@@ -1,9 +1,7 @@
-mod server_stream;
-mod server_event;
-mod stream_writer;
+mod stream;
+mod event;
 
-pub use server_stream::ServerStream;
-pub use stream_writer::StreamWriter;
+pub use stream::ServerStream;
 
 use std::net::SocketAddr;
 
@@ -41,9 +39,9 @@ impl Server {
 mod server_tests {
   use super::{
     Server,
-    server_event::ServerEvent,
-    server_event::ServerEvent_StreamError,
-    server_event::ServerEventTag,
+    event::ServerEvent,
+    event::ServerEvent_StreamError,
+    event::ServerEventTag,
     // ServerStream,
   };
   use tokio;

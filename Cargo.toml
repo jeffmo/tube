@@ -1,13 +1,5 @@
-[package]
-name = "streamr"
-version = "0.1.0"
-edition = "2021"
+[workspace]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-futures = "0.3.19"
-
-# This is here to support "#[tokio::test]" (for running async fn tests)
-# See src/server/mod.rs for the usage that sparked this dep
-tokio = { version = "1.15.0", features = ["rt", "macros"] }
+members = [
+  "streamr_server",
+]

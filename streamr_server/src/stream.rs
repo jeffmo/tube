@@ -1,8 +1,8 @@
 use futures;
-use super::server_event::ServerEvent;
-use super::server_event::ServerEvent_StreamError;
-use super::server_event::ServerEventStateMachine;
-use super::server_event::ServerEventStateMachineTransitionResult;
+use crate::event::ServerEvent;
+use crate::event::ServerEvent_StreamError;
+use crate::event::ServerEventStateMachine;
+use crate::event::ServerEventStateMachineTransitionResult;
 
 pub struct ServerStream {
     event_state_machine: ServerEventStateMachine,
