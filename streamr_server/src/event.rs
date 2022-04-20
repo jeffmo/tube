@@ -1,11 +1,13 @@
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DrainReason {}
-#[derive(Clone)]
+
+#[derive(Clone, Debug, PartialEq)]
+#[allow(non_camel_case_types)]
 pub enum ServerEvent_StreamError {
   InvalidServerEventTransition(ServerEventTag, ServerEventTag),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ServerEvent {
     AuthenticatedAndReady,
     Payload(Vec<u8>),
@@ -39,9 +41,7 @@ impl From<&ServerEvent> for ServerEventTag {
 
 pub enum ServerEventStateMachineTransitionResult {
   Valid,
-  InvalidContinue(ServerEventTag, ServerEventTag),
-  // TODO: Include an error of some kind
-  InvalidFatal(ServerEventTag, ServerEventTag), 
+  Invalid(ServerEventTag, ServerEventTag), 
 }
 
 pub struct ServerEventStateMachine {
@@ -96,7 +96,7 @@ impl ServerEventStateMachine {
 
         // InvalidFatal fallthrough
         (_, _) => {
-          ServerEventStateMachineTransitionResult::InvalidFatal(
+          ServerEventStateMachineTransitionResult::Invalid(
             self.prev_event_tag.clone(), next_event_tag)
         },
       }

@@ -9,13 +9,15 @@ pub struct Server {
   running: bool,
 }
 impl Server {
+  #[allow(dead_code)]
   fn new() -> Self {
     Server {
       running: false,
     }
   }
 
-  pub async fn listen(&mut self, addr: &SocketAddr) -> Result<ServerStream, Box<dyn std::error::Error + Send + Sync>> {
+  pub async fn listen(&mut self, _addr: &SocketAddr) 
+    -> Result<ServerStream, Box<dyn std::error::Error + Send + Sync>> {
     if self.running {
       // TODO: Log an error here?
       return Err(Box::new(std::io::Error::new(
@@ -37,53 +39,17 @@ impl Server {
 
 #[cfg(test)]
 mod server_tests {
-  use super::{
-    Server,
-    event::ServerEvent,
-    event::ServerEvent_StreamError,
-    event::ServerEventTag,
-    // ServerStream,
-  };
   use tokio;
-  use futures::StreamExt;
+
+  use super::Server;
 
   #[tokio::test]
-  async fn constructs() {
+  async fn server_listens() {
     let mut server = Server::new();
     let addr = std::net::SocketAddr::from(([127,0,0,1], 3000));
-    let mut server_stream = server.listen(&addr).await.unwrap();
+    server.listen(&addr).await.unwrap();
 
-
-    /////////////////////////////
-    // !!!===PICK UP HERE==!!! //
-    /////////////////////////////
-
-    // TODO: Use "#[cfg(test)]" to implement a test-only function on the 
-    //       ServerStream trait that allows this test to specify a series of 
-    //       client-sent Streamr frames
-
-    let events = 
-      server_stream
-        .collect::<Vec<ServerEvent>>().await;
-    let events2 = events.clone();
-    let event_tags: Vec<ServerEventTag> = 
-      events.into_iter()
-        .map(|event| ServerEventTag::from(&event))
-        .collect();
-
-    assert_eq!(event_tags, [
-       ServerEventTag::AuthenticatedAndReady, 
-       ServerEventTag::StreamError,
-    ]);
-
-    match &events2[1] {
-      ServerEvent::StreamError(
-        ServerEvent_StreamError::InvalidServerEventTransition(from, to)
-      ) => {
-        assert_eq!(*from, ServerEventTag::AuthenticatedAndReady);
-        assert_eq!(*to, ServerEventTag::AuthenticatedAndReady);
-      },
-      _ => panic!(),
-    };
+    // TODO: This test is mostly for running a server manually.
+    //       Need to think about how best to write a test for listen()...
   }
 }
