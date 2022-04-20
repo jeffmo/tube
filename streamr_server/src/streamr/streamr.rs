@@ -39,9 +39,7 @@ impl futures::stream::Stream for Streamr {
 
         // TODO: Determine the event by decoding the Streamr frame
         //       (For now we're hardcoding until we can decide on an http lib)
-        //let event = StreamrEvent::AuthenticatedAndReady;
-        let next_event = self.get_next_event();
-        match next_event {
+        match self.get_next_event() {
             None => {
                 self.stream_has_ended = true;
                 futures::task::Poll::Ready(None)
