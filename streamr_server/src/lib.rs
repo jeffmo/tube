@@ -1,7 +1,7 @@
-mod stream;
+mod streamr;
 mod event;
 
-pub use stream::ServerStream;
+pub use streamr::Streamr;
 
 use std::net::SocketAddr;
 
@@ -17,7 +17,7 @@ impl Server {
   }
 
   pub async fn listen(&mut self, _addr: &SocketAddr) 
-    -> Result<ServerStream, Box<dyn std::error::Error + Send + Sync>> {
+    -> Result<Streamr, Box<dyn std::error::Error + Send + Sync>> {
     if self.running {
       // TODO: Log an error here?
       return Err(Box::new(std::io::Error::new(
@@ -33,7 +33,7 @@ impl Server {
 
     self.running = true;
     println!("Now running!");
-    Ok(ServerStream::new())
+    Ok(Streamr::new())
   }
 }
 

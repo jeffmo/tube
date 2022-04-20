@@ -6,14 +6,14 @@ use crate::event::ServerEvent_StreamError;
 use crate::event::ServerEventStateMachine;
 use crate::event::ServerEventStateMachineTransitionResult;
 
-pub struct ServerStream {
+pub struct Streamr {
     event_state_machine: ServerEventStateMachine,
     stream_has_ended: bool,
     test_events: Option<VecDeque<ServerEvent>>,
 }
-impl ServerStream {
+impl Streamr {
     pub fn new() -> Self {
-        ServerStream {
+        Streamr {
             event_state_machine: ServerEventStateMachine::new(),
             stream_has_ended: false,
             test_events: None,
@@ -27,7 +27,7 @@ impl ServerStream {
         }
     }
 }
-impl futures::stream::Stream for ServerStream {
+impl futures::stream::Stream for Streamr {
     type Item = ServerEvent;
 
     fn poll_next(
@@ -67,25 +67,25 @@ impl futures::stream::Stream for ServerStream {
 }
 
 #[cfg(test)]
-impl ServerStream {
+impl Streamr {
     pub fn set_test_events(&mut self, events: Vec<ServerEvent>) {
         self.test_events = Some(VecDeque::from(events))
     }
 }
 
 #[cfg(test)]
-mod stream_tests {
+mod streamr_tests {
     use futures::StreamExt;
     use tokio;
 
     use crate::event::ServerEvent;
     use crate::event::ServerEvent_StreamError;
     use crate::event::ServerEventTag;
-    use crate::stream::ServerStream;
+    use crate::streamr::Streamr;
 
     #[tokio::test]
     async fn emits_valid_initial_event() {
-        let mut stream = ServerStream::new();
+        let mut stream = Streamr::new();
         let test_events = vec![
             ServerEvent::AuthenticatedAndReady,
         ];
@@ -98,7 +98,7 @@ mod stream_tests {
 
     #[tokio::test]
     async fn emits_error_on_payload_before_authenticated() {
-        let mut stream = ServerStream::new();
+        let mut stream = Streamr::new();
         let test_events = vec![
             ServerEvent::Payload(vec![]),
         ];
@@ -118,7 +118,7 @@ mod stream_tests {
 
     #[tokio::test]
     async fn emits_error_on_payload_after_clienthasfinished() {
-        let mut stream = ServerStream::new();
+        let mut stream = Streamr::new();
         let test_events = vec![
             ServerEvent::AuthenticatedAndReady,
             ServerEvent::ClientHasFinishedSending,
@@ -145,7 +145,7 @@ mod stream_tests {
 
     #[tokio::test]
     async fn terminates_stream_on_first_erroneous_event() {
-        let mut stream = ServerStream::new();
+        let mut stream = Streamr::new();
         let test_events = vec![
             ServerEvent::AuthenticatedAndReady,
             ServerEvent::ClientHasFinishedSending,
