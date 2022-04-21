@@ -1,5 +1,6 @@
 [workspace]
 
 members = [
+  "streamr_common",
   "streamr_server",
 ]
