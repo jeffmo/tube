@@ -122,3 +122,71 @@ pub fn encode_server_has_finished_sending_frame(
     ])
 }
 
+#[cfg(test)]
+mod encode_payload_tests {
+    use super::encode_payload_frame;
+    use super::FrameEncodeError;
+
+    #[test]
+    fn errors_on_oversized_data() {
+        let mut data: Vec<u8> = Vec::with_capacity(66000);
+        let mut value: u8 = 0;
+        for _i in 0..66000 {
+            data.push(value);
+            if value == 255 {
+              value = 0;
+            } else {
+              value += 1;
+            }
+        }
+
+        match encode_payload_frame(42, Some(42), data) {
+            Err(FrameEncodeError::DataTooLarge(size)) => assert_eq!(size, 66000),
+            Err(err) => panic!(concat!(
+                "Received the wrong error when passing too much data to ",
+                "encode_payload_frame: {:?}"),
+                err
+            ),
+            Ok(_) => panic!(concat!(
+                "Did not receive an error when passing too much data to ",
+                "encode_payload_frame!"
+            )),
+        }
+    }
+
+    #[test]
+    fn errors_on_oversized_ackid() {
+        match encode_payload_frame(42, Some(65000), vec![]) {
+            Err(FrameEncodeError::AckIdTooLarge(size)) => assert_eq!(size, 65000),
+            Err(err) => panic!(
+                "Received the wrong error when passing an oversized ack_id: {:?}",
+                err
+            ),
+            Ok(_) => panic!(concat!(
+                "Did not receive an error when passing an oversized ack_id to ",
+                "encode_payload_frame!"
+            )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod encode_payload_ack_tests {
+    use super::encode_payload_ack_frame;
+    use super::FrameEncodeError;
+
+    #[test]
+    fn errors_on_oversized_ackid() {
+        match encode_payload_ack_frame(42, 65000) {
+            Err(FrameEncodeError::AckIdTooLarge(size)) => assert_eq!(size, 65000),
+            Err(err) => panic!(
+                "Received the wrong error when passing an oversized ack_id: {:?}",
+                err
+            ),
+            Ok(_) => panic!(concat!(
+                "Did not receive an error when passing an oversized ack_id to ",
+                "encode_payload_ack_frame!"
+            )),
+        }
+    }
+}
