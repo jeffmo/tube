@@ -12,9 +12,9 @@ use super::frame;
 pub struct FrameDecodeError {
     // TODO: Remove these allow(dead_code) tags if they aren't needed anymore
     #[allow(dead_code)]
-    parse_error: FrameParseError,
+    pub parse_error: FrameParseError,
     #[allow(dead_code)]
-    num_frames_parsed_successfully: usize,
+    pub num_frames_parsed_successfully: usize,
 }
 
 #[derive(Debug)]
@@ -131,7 +131,7 @@ impl Decoder {
         }
     }
 
-    pub fn decode(mut self, data: Vec<u8>) -> Result<Vec<frame::Frame>, FrameDecodeError> {
+    pub fn decode(&mut self, data: Vec<u8>) -> Result<Vec<frame::Frame>, FrameDecodeError> {
         self.partial_data.append(&mut VecDeque::from(data));
 
         let mut decoded_frames = vec![];
@@ -143,12 +143,11 @@ impl Decoder {
 
             // If we have at least a full frame, parse it
             if (self.partial_data.len() as u16) >= 3 + body_len {
-                let index_after_last_frame_byte = 3 + body_len;
-                let remainder_data = 
-                    self.partial_data.split_off(index_after_last_frame_byte.into());
-
-                let mut frame_data = self.partial_data;
-                self.partial_data = remainder_data;
+                let index_after_last_frame_byte: usize = (3 + body_len).into();
+                let mut frame_data = 
+                    self.partial_data
+                        .drain(0..index_after_last_frame_byte)
+                        .collect::<VecDeque<_>>();
 
                 let frame_type = match frame_data.pop_front() {
                     Some(ft) => ft,
@@ -183,3 +182,4 @@ impl Decoder {
         Ok(decoded_frames)
     }
 }
+
