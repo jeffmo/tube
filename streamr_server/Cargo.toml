@@ -7,7 +7,5 @@ edition = "2021"
 
 [dependencies]
 futures = "0.3.19"
-
-# This is here to support "#[tokio::test]" (for running async fn tests)
-# See src/server/mod.rs for the usage that sparked this dep
+hyper = { version = "0.14.18", features = ["full"] }
 tokio = { version = "1.15.0", features = ["rt", "macros"] }
