@@ -12,14 +12,14 @@ pub enum FrameEncodeError {
 }
 
 pub fn encode_client_has_finished_sending_frame(
-    streamr_id: u16,
+    tube_id: u16,
 ) -> Result<Vec<u8>, FrameEncodeError> {
-    let streamrid_bytes = streamr_id.to_be_bytes();
+    let tubeid_bytes = tube_id.to_be_bytes();
     Ok(vec![
         frame::CLIENT_HAS_FINISHED_SENDING_FRAMETYPE, 
         0, 2,
-        streamrid_bytes[0], 
-        streamrid_bytes[1],
+        tubeid_bytes[0], 
+        tubeid_bytes[1],
     ])
 }
 
@@ -31,11 +31,11 @@ pub fn encode_drain_frame() -> Result<Vec<u8>, FrameEncodeError> {
     ])
 }
 
-pub fn encode_establish_streamr_frame(
-    streamr_id: u16, 
+pub fn encode_establish_tube_frame(
+    tube_id: u16, 
     headers: HashMap<String, String>
 ) -> Result<Vec<u8>, FrameEncodeError> {
-    let streamrid_bytes = streamr_id.to_be_bytes();
+    let tubeid_bytes = tube_id.to_be_bytes();
     let mut headers_json_str_bytes = match serde_json::to_string(&headers) {
         Ok(json_str) => json_str.into_bytes(),
         Err(json_err) => return Err(FrameEncodeError::HeaderJsonEncodeError(json_err))
@@ -46,15 +46,15 @@ pub fn encode_establish_streamr_frame(
         frame::ESTABLISH_STREAMR_FRAMETYPE, 
         body_len_bytes[0],
         body_len_bytes[1],
-        streamrid_bytes[0], 
-        streamrid_bytes[1],
+        tubeid_bytes[0], 
+        tubeid_bytes[1],
     ];
     bytes.append(&mut headers_json_str_bytes);
     Ok(bytes)
 }
 
 pub fn encode_payload_frame(
-    streamr_id: u16,
+    tube_id: u16,
     ack_id: Option<u16>,
     mut data: Vec<u8>,
 ) -> Result<Vec<u8>, FrameEncodeError> {
@@ -64,7 +64,7 @@ pub fn encode_payload_frame(
         return Err(FrameEncodeError::DataTooLarge(data.len()))
     }
 
-    let streamrid_bytes = streamr_id.to_be_bytes();
+    let tubeid_bytes = tube_id.to_be_bytes();
     let ack_bytes = match ack_id {
         Some(ack_id) => {
             if ((0b1000_0000 << 8) & ack_id) > 0 {
@@ -81,8 +81,8 @@ pub fn encode_payload_frame(
         frame::PAYLOAD_FRAMETYPE,
         body_len_bytes[0],
         body_len_bytes[1],
-        streamrid_bytes[0],
-        streamrid_bytes[1],
+        tubeid_bytes[0],
+        tubeid_bytes[1],
         ack_bytes[0],
         ack_bytes[1],
     ];
@@ -91,10 +91,10 @@ pub fn encode_payload_frame(
 }
 
 pub fn encode_payload_ack_frame(
-    streamr_id: u16,
+    tube_id: u16,
     ack_id: u16,
 ) -> Result<Vec<u8>, FrameEncodeError> {
-    let streamrid_bytes = streamr_id.to_be_bytes();
+    let tubeid_bytes = tube_id.to_be_bytes();
     let ack_id_bytes = if ((0b1000_0000 << 8) & ack_id) > 0 {
         return Err(FrameEncodeError::AckIdTooLarge(ack_id));
     } else {
@@ -103,22 +103,22 @@ pub fn encode_payload_ack_frame(
     Ok(vec![
        frame::PAYLOAD_ACK_FRAMETYPE,
        0, 4,
-       streamrid_bytes[0],
-       streamrid_bytes[1],
+       tubeid_bytes[0],
+       tubeid_bytes[1],
        ack_id_bytes[0],
        ack_id_bytes[1],
     ])
 }
 
 pub fn encode_server_has_finished_sending_frame(
-    streamr_id: u16,
+    tube_id: u16,
 ) -> Result<Vec<u8>, FrameEncodeError> {
-    let streamrid_bytes = streamr_id.to_be_bytes();
+    let tubeid_bytes = tube_id.to_be_bytes();
     Ok(vec![
         frame::SERVER_HAS_FINISHED_SENDING_FRAMETYPE, 
         0, 2,
-        streamrid_bytes[0], 
-        streamrid_bytes[1],
+        tubeid_bytes[0], 
+        tubeid_bytes[1],
     ])
 }
 

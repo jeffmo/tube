@@ -37,11 +37,11 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
     match frame_type {
         // ClientHasFinishedSending
         frame::CLIENT_HAS_FINISHED_SENDING_FRAMETYPE => {
-            let streamr_id = double_u8_to_u16(
+            let tube_id = double_u8_to_u16(
                 frame_body_data[0],
                 frame_body_data[1],
             );
-            Ok(frame::Frame::ClientHasFinishedSending { streamr_id })
+            Ok(frame::Frame::ClientHasFinishedSending { tube_id })
         },
 
         // Drain
@@ -49,10 +49,10 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
             Ok(frame::Frame::Drain)
         },
 
-        // EstablishStreamr
+        // EstablishTube
         2 => {
             let mut header_bytes = frame_body_data.split_off(2);
-            let streamr_id = double_u8_to_u16(
+            let tube_id = double_u8_to_u16(
                 frame_body_data[0],
                 frame_body_data[1],
             );
@@ -64,13 +64,13 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
                 Ok(headers) => headers,
                 Err(json_err) => return Err(FrameParseError::HeaderJsonDecodeError(json_err))
             };
-            Ok(frame::Frame::EstablishStreamr { streamr_id, headers })
+            Ok(frame::Frame::EstablishTube { tube_id, headers })
         },
 
         // Payload
         3 => {
             let data = frame_body_data.split_off(4).make_contiguous().to_vec();
-            let streamr_id = double_u8_to_u16(
+            let tube_id = double_u8_to_u16(
                 frame_body_data[0],
                 frame_body_data[1],
             );
@@ -86,12 +86,12 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
                 } else {
                     None
                 };
-            Ok(frame::Frame::Payload { streamr_id, ack_id, data })
+            Ok(frame::Frame::Payload { tube_id, ack_id, data })
         },
 
         // PayloadAck
         4 => {
-            let streamr_id = double_u8_to_u16(
+            let tube_id = double_u8_to_u16(
                 frame_body_data[0],
                 frame_body_data[1],
             );
@@ -105,16 +105,16 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
                 127 & frame_body_data[2],
                 frame_body_data[3],
             );
-            Ok(frame::Frame::PayloadAck { streamr_id, ack_id })
+            Ok(frame::Frame::PayloadAck { tube_id, ack_id })
         },
 
         // ServerHasFinishedSending
         5 => {
-            let streamr_id = double_u8_to_u16(
+            let tube_id = double_u8_to_u16(
                 frame_body_data[0],
                 frame_body_data[1],
             );
-            Ok(frame::Frame::ServerHasFinishedSending { streamr_id })
+            Ok(frame::Frame::ServerHasFinishedSending { tube_id })
         },
 
         _ => Err(FrameParseError::UnknownFrameType(frame_type)),
@@ -208,7 +208,7 @@ mod decoder_tests {
 
         let decoded_frames = &decoder.decode(vec![final_byte]).unwrap();
         assert_eq!(decoded_frames.len(), 1);
-        assert_eq!(decoded_frames[0], Frame::ClientHasFinishedSending { streamr_id: 43 });
+        assert_eq!(decoded_frames[0], Frame::ClientHasFinishedSending { tube_id: 43 });
     }
 
     #[test]
@@ -220,8 +220,8 @@ mod decoder_tests {
 
         let decoded_frames = &decoder.decode(data).unwrap();
         assert_eq!(decoded_frames.len(), 2);
-        assert_eq!(decoded_frames[0], Frame::ClientHasFinishedSending { streamr_id: 43 });
-        assert_eq!(decoded_frames[1], Frame::ServerHasFinishedSending { streamr_id: 42 });
+        assert_eq!(decoded_frames[0], Frame::ClientHasFinishedSending { tube_id: 43 });
+        assert_eq!(decoded_frames[1], Frame::ServerHasFinishedSending { tube_id: 42 });
     }
 
     #[test]
@@ -234,22 +234,22 @@ mod decoder_tests {
 
         let decoded_frames = &decoder.decode(data).unwrap();
         assert_eq!(decoded_frames.len(), 1);
-        assert_eq!(decoded_frames[0], Frame::ClientHasFinishedSending { streamr_id: 43 });
+        assert_eq!(decoded_frames[0], Frame::ClientHasFinishedSending { tube_id: 43 });
 
         let decoded_frames = &decoder.decode(vec![final_byte]).unwrap();
         assert_eq!(decoded_frames.len(), 1);
-        assert_eq!(decoded_frames[0], Frame::ServerHasFinishedSending { streamr_id: 42 });
+        assert_eq!(decoded_frames[0], Frame::ServerHasFinishedSending { tube_id: 42 });
     }
 
     #[test]
-    fn errors_if_invalid_utf8_passed_for_establishstreamr_headers() {
+    fn errors_if_invalid_utf8_passed_for_establishtube_headers() {
         let mut decoder = Decoder::new();
 
         let headers = HashMap::from([
           ("header1".to_string(), "value1".to_string()),
           ("header2".to_string(), "value2".to_string()),
         ]);
-        let mut data = encode_establish_streamr_frame(42, headers).unwrap();
+        let mut data = encode_establish_tube_frame(42, headers).unwrap();
 
         // Tweak encoded data to insert an invalid utf8 byte into the encoded 
         // headers region of the frame.
@@ -258,7 +258,7 @@ mod decoder_tests {
 
         match &decoder.decode(data) {
             Ok(_frames) => panic!(concat!(
-                "Successfully decoded an EstablishStreamr frame that contains ",
+                "Successfully decoded an EstablishTube frame that contains ",
                 "invalid utf8!"
             )),
 
@@ -269,7 +269,7 @@ mod decoder_tests {
 
             Err(err) => panic!(
                 concat!(
-                    "Correctly errored on an EstablishStreamr frame with ",
+                    "Correctly errored on an EstablishTube frame with ",
                     "invalid utf8, but provided an unexpected error value: {:?}"
                 ), 
                 err
@@ -278,11 +278,11 @@ mod decoder_tests {
     }
 
     #[test]
-    fn errors_if_invalid_json_passed_for_establishstreamr_headers() {
+    fn errors_if_invalid_json_passed_for_establishtube_headers() {
         let mut decoder = Decoder::new();
 
         let headers = HashMap::from([]);
-        let correct_data = encode_establish_streamr_frame(42, headers).unwrap();
+        let correct_data = encode_establish_tube_frame(42, headers).unwrap();
 
         // Tweak encoded data to insert invalid json into the headers portion 
         // of the frame.
@@ -294,7 +294,7 @@ mod decoder_tests {
           correct_data[1],
           correct_data[2],
 
-          // StreamrId
+          // TubeId
           correct_data[3],
           correct_data[4],
         ];
@@ -304,7 +304,7 @@ mod decoder_tests {
 
         match &decoder.decode(bad_data) {
             Ok(_frames) => panic!(concat!(
-                "Successfully decoded an EstablishStreamr frame that contains ",
+                "Successfully decoded an EstablishTube frame that contains ",
                 "an invalid json encoding of it's headers!"
             )),
 
@@ -315,7 +315,7 @@ mod decoder_tests {
 
             Err(err) => panic!(
                 concat!(
-                    "Correctly errored on an EstablishStreamr frame with invalid ",
+                    "Correctly errored on an EstablishTube frame with invalid ",
                     "utf8, but provided an unexpected error value: {:?}"
                 ), 
                 err

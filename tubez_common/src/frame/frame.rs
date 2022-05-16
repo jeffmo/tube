@@ -8,7 +8,7 @@ pub(in crate::frame) const PAYLOAD_ACK_FRAMETYPE: u8 = 0x4;
 pub(in crate::frame) const SERVER_HAS_FINISHED_SENDING_FRAMETYPE: u8 = 0x5;
 
 /**
- * Each encoded Streamr frame specifies its own structure, but all frames begin 
+ * Each encoded Tube frame specifies its own structure, but all frames begin 
  * with the following header structure:
  *
  *   +-----------------+----------------------------+
@@ -27,48 +27,48 @@ pub(in crate::frame) const SERVER_HAS_FINISHED_SENDING_FRAMETYPE: u8 = 0x5;
 pub enum Frame {
     /**
      * This frame is sent by the client when it will send no further Payload 
-     * frames for a given Streamr.
+     * frames for a given Tube.
      *
-     *   +------------------+
-     *   |  StreamrId(u16)  |
-     *   +------------------+
+     *   +---------------+
+     *   |  TubeId(u16)  |
+     *   +---------------+
      */
     ClientHasFinishedSending {
-      streamr_id: u16,
+      tube_id: u16,
     },
 
     /**
-     * This frame is sent to both peers as a signal that a StreamrTransport 
+     * This frame is sent to both peers as a signal that a TubeTransport 
      * needs to be drained (AKA gracefully shutdown). It is up to the 
      * application running on each peer to use this signal to coordinate the 
-     * graceful shutdown of all Streamrs hosted by the StreamrTransport this 
+     * graceful shutdown of all Tubes hosted by the TubeTransport this 
      * frame arrived on.
      */
     Drain,
 
     /**
      * This frame is sent by either peer to indicate the creation of a new 
-     * Streamr. Client-generated Streamrs always use an odd-numbered id, and 
-     * Server-generated Streamrs always use an even-numbered id.
+     * Tube. Client-generated Tubes always use an odd-numbered id, and 
+     * Server-generated Tubes always use an even-numbered id.
      *
-     *   +------------------+-----------------------------+
-     *   |  StreamrId(u16)  |  Utf8EncodedJSONHeaders(*)  |
-     *   +------------------+-----------------------------+
+     *   +---------------+-----------------------------+
+     *   |  TubeId(u16)  |  Utf8EncodedJSONHeaders(*)  |
+     *   +---------------+-----------------------------+
      */
-    EstablishStreamr {
-      streamr_id: u16,
+    EstablishTube {
+      tube_id: u16,
       headers: HashMap<String, String>,
     },
 
     /**
      * This frame is sent by either peer to transmit data.
      *
-     *   +------------------+-------------------+-------------+-----------+
-     *   |  StreamrId(u16)  |  AckRequested(1)  |  AckId(15)  |  Data(*)  |
-     *   +------------------+-------------------+-------------+-----------+
+     *   +---------------+-------------------+-------------+-----------+
+     *   |  TubeId(u16)  |  AckRequested(1)  |  AckId(15)  |  Data(*)  |
+     *   +---------------+-------------------+-------------+-----------+
      */
     Payload {
-      streamr_id: u16,
+      tube_id: u16,
       ack_id: Option<u16>,
       data: Vec<u8>,
     },
@@ -79,24 +79,24 @@ pub enum Frame {
      * the other peer received a Payload, it does not necessarily mean that the 
      * application successfully processed the payload.
      *
-     *   +------------------+---------------+-------------+
-     *   |  StreamrId(u16)  |  RESERVED(1)  |  AckId(15)  |
-     *   +------------------+---------------+-------------+
+     *   +---------------+---------------+-------------+
+     *   |  TubeId(u16)  |  RESERVED(1)  |  AckId(15)  |
+     *   +---------------+---------------+-------------+
      */
     PayloadAck {
-      streamr_id: u16,
+      tube_id: u16,
       ack_id: u16,
     },
 
     /**
      * This frame is sent by the server when it will send no further Payload 
-     * frames for a given Streamr.
+     * frames for a given Tube.
      *
-     *   +------------------+
-     *   |  StreamrId(u16)  |
-     *   +------------------+
+     *   +---------------+
+     *   |  TubeId(u16)  |
+     *   +---------------+
      */
     ServerHasFinishedSending {
-      streamr_id: u16,
+      tube_id: u16,
     },
 }

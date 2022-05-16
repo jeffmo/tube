@@ -3,9 +3,9 @@ use std::net::SocketAddr;
 
 use hyper;
 
-use crate::streamr::Streamr;
+use crate::tube::Tube;
 
-async fn streamr_request_handler(
+async fn tubez_request_handler(
     _req: hyper::Request<hyper::Body>,
 ) -> Result<hyper::Response<hyper::Body>, std::convert::Infallible> {
     let (mut body_sender, body) = hyper::Body::channel();
@@ -33,7 +33,7 @@ async fn streamr_request_handler(
 }
 
 pub struct Server {
-    test_streamrs: Option<VecDeque<Streamr>>,
+    test_tubes: Option<VecDeque<Tube>>,
 }
 impl Server {
     #[allow(dead_code)]
@@ -41,11 +41,11 @@ impl Server {
         // TODO1: Start up an http server
         // Using example here: https://docs.rs/hyper/0.14.16/hyper/server/conn/index.html
 
-        let streamr_makeservice = hyper::service::make_service_fn(
+        let tubez_makeservice = hyper::service::make_service_fn(
             |_conn: &hyper::server::conn::AddrStream| {
                 async {
                     Ok::<_, std::convert::Infallible>(hyper::service::service_fn(
-                        streamr_request_handler
+                        tubez_request_handler
                     ))
                 }
             }
@@ -54,39 +54,39 @@ impl Server {
         let hyper_server = 
             hyper::Server::bind(&addr)
                 .http2_only(true)
-                .serve(streamr_makeservice);
+                .serve(tubez_makeservice);
 
         if let Err(e) = hyper_server.await {
             eprintln!("server error: {}", e);
         }
 
         Server {
-            test_streamrs: None,
+            test_tubes: None,
         }
     }
 }
 impl futures::stream::Stream for Server {
-    type Item = Streamr;
+    type Item = Tube;
 
     fn poll_next(
         mut self: core::pin::Pin<&mut Self>,
         _cx: &mut futures::task::Context,
     ) -> futures::task::Poll<Option<Self::Item>> {
-        let next_streamr = match self.test_streamrs.as_mut() {
-            Some(test_streamrs) => test_streamrs.pop_front(),
+        let next_tube = match self.test_tubes.as_mut() {
+            Some(test_tubes) => test_tubes.pop_front(),
 
             // TODO
-            None => panic!("No test streamrs found and http has not been integrated yet!"),
+            None => panic!("No test tubes found and http has not been integrated yet!"),
         };
 
-        futures::task::Poll::Ready(next_streamr)
+        futures::task::Poll::Ready(next_tube)
     }
 }
 
 #[cfg(test)]
 impl Server {
-    pub fn set_test_streamrs(&mut self, streamrs: Vec<Streamr>) {
-        self.test_streamrs = Some(VecDeque::from(streamrs))
+    pub fn set_test_tubes(&mut self, tubes: Vec<Tube>) {
+        self.test_tubes = Some(VecDeque::from(tubes))
     }
 }
 
@@ -96,9 +96,9 @@ mod server_tests {
     use tokio;
 
     use super::Server;
-    use crate::streamr::Streamr;
+    use crate::tube::Tube;
 
-    // TODO: This test is silly and basically just tests the set_test_streamrs 
+    // TODO: This test is silly and basically just tests the set_test_tubes 
     //       mechanics. Delete it when there's something more useful to write a 
     //       test around.
     #[tokio::test]
@@ -106,12 +106,12 @@ mod server_tests {
         let addr = std::net::SocketAddr::from(([127,0,0,1], 3000));
         let mut server = Server::new(&addr).await;
 
-        server.set_test_streamrs(vec![
-            Streamr::new(),
-            Streamr::new(),
+        server.set_test_tubes(vec![
+            Tube::new(),
+            Tube::new(),
         ]);
 
-        let actual_streamrs = server.collect::<Vec<Streamr>>().await;
-        assert_eq!(actual_streamrs.len(), 2);
+        let actual_tubes = server.collect::<Vec<Tube>>().await;
+        assert_eq!(actual_tubes.len(), 2);
     }
 }

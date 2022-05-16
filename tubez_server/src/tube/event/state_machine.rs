@@ -1,29 +1,29 @@
-use super::event::StreamrEvent;
-use super::event::StreamrEventTag;
+use super::event::TubeEvent;
+use super::event::TubeEventTag;
 
 pub enum StateMachineTransitionResult {
   Valid,
-  Invalid(StreamrEventTag, StreamrEventTag), 
+  Invalid(TubeEventTag, TubeEventTag), 
 }
 
 pub struct StateMachine {
-  prev_event_tag: StreamrEventTag,
+  prev_event_tag: TubeEventTag,
 }
 impl StateMachine {
   pub fn new() -> Self {
     StateMachine {
-      prev_event_tag: StreamrEventTag::Uninitialized,
+      prev_event_tag: TubeEventTag::Uninitialized,
     }
   }
 
-  pub fn transition_to(&mut self, next_event: &StreamrEvent) 
+  pub fn transition_to(&mut self, next_event: &TubeEvent) 
     -> StateMachineTransitionResult {
-    let next_event_tag = StreamrEventTag::from(next_event);
+    let next_event_tag = TubeEventTag::from(next_event);
 
     // TODO: Mayhaps a fancy StateMachine crate lib could be created with a 
     //       little less verbose macro syntax to describe the state machine?
     {
-      use StreamrEventTag::*;
+      use TubeEventTag::*;
       match (&self.prev_event_tag, &next_event_tag) {
         (Uninitialized, AuthenticatedAndReady) => {
           self.prev_event_tag = next_event_tag;

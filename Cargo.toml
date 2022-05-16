@@ -1,6 +1,6 @@
 [workspace]
 
 members = [
-  "streamr_common",
-  "streamr_server",
+  "tubez_common",
+  "tubez_server",
 ]
