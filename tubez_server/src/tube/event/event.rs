@@ -5,6 +5,7 @@ pub enum DrainReason {}
 #[allow(non_camel_case_types)]
 pub enum TubeEvent_StreamError {
   InvalidTubeEventTransition(TubeEventTag, TubeEventTag),
+  ServerError(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
