@@ -60,28 +60,6 @@ impl Server {
                       waker.wake();
                     }
 
-                    /*
-                    let threadid = thread::current().id();
-                    println!("Spawning second task (thread={:?})...", threadid);
-                    tokio::spawn(async move {
-                        println!("Sending first chunk (thread={:?})...", threadid);
-                        match body_sender.send_data("First chunk...\n".into()).await {
-                            Ok(()) => println!("First chunk sent!"),
-                            Err(err) => panic!("First chunk failed to send! {:?}", err)
-                        };
-                        println!("Waiting 3s before second chunk...");
-                        tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
-
-                        println!("Sending second chunk...");
-                        match body_sender.send_data("...second chunk.\n".into()).await {
-                            Ok(()) => println!("Second chunk sent!"),
-                            Err(err) => panic!("Second chunk failed to send! {:?}", err),
-                        };
-                        println!("Second task complete");
-                    });
-                    println!("Returning response object...");
-                    */
-
                     // Need an explicit type annotation so the compiler 
                     // can infer the type of Error
                     let res: Result<
@@ -161,6 +139,7 @@ mod server_tests {
     use tokio;
 
     use super::Server;
+    use super::Tube;
 
     // TODO: This test is silly and basically just tests the set_test_tubes 
     //       mechanics. Delete it when there's something more useful to write a 
@@ -171,8 +150,17 @@ mod server_tests {
         let mut server = Server::new(&addr).await;
 
         println!("Waiting for Tubes...");
-        while let Some(_tube) = server.next().await {
-          println!("Tube!");
+        while let Some(Ok(mut tube)) = server.next().await {
+          tokio::spawn(async move {
+            println!("New Tube! Sending first chunk...");
+            tube.send_and_forget("First chunk...\n".into());
+
+            println!("Waiting 3s before sending second chunk...");
+            tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
+
+            println!("Sending second chunk...");
+            tube.send_and_forget("...second chunk.\n".into());
+          });
         }
     }
 }

@@ -44,6 +44,12 @@ impl Tube {
             sender,
         }
     }
+
+    pub fn send_and_forget(&mut self, data: Vec<u8>) {
+        // TODO: Encode this in a Data frame before actually sending it over the transport
+        // TODO: Check for Err() return and pass that up if it happens
+        self.sender.try_send_data(data.into());
+    }
 }
 impl futures::stream::Stream for Tube {
     type Item = TubeEvent;
