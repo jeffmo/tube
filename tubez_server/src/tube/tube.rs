@@ -4,9 +4,17 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::task::Waker;
 
+use tubez_common::frame;
+
 use crate::tube::event;
 use crate::tube::event::TubeEvent;
 use crate::tube::event::TubeEvent_StreamError;
+
+#[derive(Debug)]
+pub enum SendError {
+    TransportError,
+    FrameEncodeError(frame::FrameEncodeError),
+}
 
 struct TubeEventQueue {
     // TODO: Merge this in with the event statemachine...?
@@ -45,10 +53,16 @@ impl Tube {
         }
     }
 
-    pub fn send_and_forget(&mut self, data: Vec<u8>) {
-        // TODO: Encode this in a Data frame before actually sending it over the transport
-        // TODO: Check for Err() return and pass that up if it happens
-        self.sender.try_send_data(data.into());
+    pub fn send_and_forget(&mut self, data: Vec<u8>) -> Result<(), SendError> {
+        // TODO: Deal with TubeIds
+        let tube_id = 42;
+        match frame::encode_payload_frame(tube_id, None, data) {
+            Ok(frame_data) => match self.sender.try_send_data(frame_data.into()) {
+                Ok(_) => Ok(()),
+                Err(_bytes) => Err(SendError::TransportError),
+            },
+            Err(e) => Err(SendError::FrameEncodeError(e)),
+        }
     }
 }
 impl futures::stream::Stream for Tube {

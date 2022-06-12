@@ -153,13 +153,13 @@ mod server_tests {
         while let Some(Ok(mut tube)) = server.next().await {
           tokio::spawn(async move {
             println!("New Tube! Sending first chunk...");
-            tube.send_and_forget("First chunk...\n".into());
+            assert!(tube.send_and_forget("First chunk...\n".into()).is_ok());
 
             println!("Waiting 3s before sending second chunk...");
             tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
 
             println!("Sending second chunk...");
-            tube.send_and_forget("...second chunk.\n".into());
+            assert!(tube.send_and_forget("...second chunk.\n".into()).is_ok());
           });
         }
     }
