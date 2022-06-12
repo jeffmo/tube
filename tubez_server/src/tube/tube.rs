@@ -30,9 +30,11 @@ pub struct Tube {
     event_queue: Arc<Mutex<TubeEventQueue>>,
     receiver: hyper::Request<hyper::Body>,
     sender: hyper::body::Sender,
+    tube_id: u16,
 }
 impl Tube {
-    pub fn new(
+    pub(in crate) fn new(
+        tube_id: u16,
         sender: hyper::body::Sender, 
         // TODO: We shouldn't accept a body here since an http request 
         //       represents a tube transport, not a single tube.
@@ -50,13 +52,12 @@ impl Tube {
             })),
             receiver,
             sender,
+            tube_id,
         }
     }
 
     pub fn send_and_forget(&mut self, data: Vec<u8>) -> Result<(), SendError> {
-        // TODO: Deal with TubeIds
-        let tube_id = 42;
-        match frame::encode_payload_frame(tube_id, None, data) {
+        match frame::encode_payload_frame(self.tube_id, None, data) {
             Ok(frame_data) => match self.sender.try_send_data(frame_data.into()) {
                 Ok(_) => Ok(()),
                 Err(_bytes) => Err(SendError::TransportError),
@@ -123,7 +124,7 @@ mod tube_tests {
     async fn emits_valid_initial_event() {
         let req = hyper::Request::new(hyper::Body::empty());
         let (sender, _body) = hyper::Body::channel();
-        let mut stream = Tube::new(sender, req);
+        let mut stream = Tube::new(42, sender, req);
         let test_events = vec![
             TubeEvent::AuthenticatedAndReady,
         ];
@@ -142,7 +143,7 @@ mod tube_tests {
     async fn emits_error_on_payload_before_authenticated() {
         let req = hyper::Request::new(hyper::Body::empty());
         let (sender, _body) = hyper::Body::channel();
-        let mut stream = Tube::new(sender, req);
+        let mut stream = Tube::new(42, sender, req);
         let test_events = vec![
             TubeEvent::Payload(vec![]),
         ];
@@ -164,7 +165,7 @@ mod tube_tests {
     async fn emits_error_on_payload_after_clienthasfinished() {
         let req = hyper::Request::new(hyper::Body::empty());
         let (sender, _body) = hyper::Body::channel();
-        let mut stream = Tube::new(sender, req);
+        let mut stream = Tube::new(42, sender, req);
         let test_events = vec![
             TubeEvent::AuthenticatedAndReady,
             TubeEvent::ClientHasFinishedSending,
@@ -193,7 +194,7 @@ mod tube_tests {
     async fn terminates_stream_on_first_erroneous_event() {
         let req = hyper::Request::new(hyper::Body::empty());
         let (sender, _body) = hyper::Body::channel();
-        let mut stream = Tube::new(sender, req);
+        let mut stream = Tube::new(42, sender, req);
         let test_events = vec![
             TubeEvent::AuthenticatedAndReady,
             TubeEvent::ClientHasFinishedSending,

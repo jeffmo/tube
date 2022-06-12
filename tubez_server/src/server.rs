@@ -45,6 +45,7 @@ impl Server {
               // A new http connection has started!
               Ok::<_, std::convert::Infallible>(hyper::service::service_fn({
                 let event_queue = event_queue.clone();
+                let mut tube_id_counter = 0;
                 move |req: hyper::Request<hyper::Body>| {
                   let event_queue = event_queue.clone();
                   async move {
@@ -52,7 +53,9 @@ impl Server {
                     let (body_sender, body) = hyper::Body::channel();
                     let response: hyper::Response<hyper::Body> = hyper::Response::new(body);
 
-                    let tube = Tube::new(body_sender, req);
+                    let tube_id = tube_id_counter;
+                    tube_id_counter += 2;
+                    let tube = Tube::new(tube_id, body_sender, req);
                     let mut event_queue = event_queue.lock().unwrap();
                     // TODO: Actually authenticate the tube first...
                     event_queue.pending_events.push_back(ServerEvent::NewTube(tube));
