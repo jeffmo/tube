@@ -56,6 +56,14 @@ impl Server {
                     let tube_id = tube_id_counter;
                     tube_id_counter += 2;
                     let tube = Tube::new(tube_id, body_sender, req);
+
+                    // TODO: Own the `req` here (rather than giving to the Tube) 
+                    //       since a single request receives frames for 
+                    //       multiple tubes.
+                    //       
+                    //       First thing: Watch request for ACK frames and 
+                    //       distribute them to their corresponding Tube
+
                     let mut event_queue = event_queue.lock().unwrap();
                     // TODO: Actually authenticate the tube first...
                     event_queue.pending_events.push_back(ServerEvent::NewTube(tube));

@@ -12,8 +12,9 @@ use crate::tube::event::TubeEvent_StreamError;
 
 #[derive(Debug)]
 pub enum SendError {
-    TransportError,
+    TransportError(hyper::Error),
     FrameEncodeError(frame::FrameEncodeError),
+    UnknownTransportError,
 }
 
 struct TubeEventQueue {
@@ -25,6 +26,7 @@ struct TubeEventQueue {
 }
 
 pub struct Tube {
+    ack_id_counter: u16,
     // TODO: Does this really need to be Arc<Mutex> since all TubeEvents stay 
     //       on a single thread?
     event_queue: Arc<Mutex<TubeEventQueue>>,
@@ -44,6 +46,7 @@ impl Tube {
         receiver: hyper::Request<hyper::Body>
     ) -> Self {
         Tube {
+            ack_id_counter: 0,
             event_queue: Arc::new(Mutex::new(TubeEventQueue {
                 pending_events: VecDeque::new(),
                 state_machine: event::StateMachine::new(),
@@ -56,11 +59,30 @@ impl Tube {
         }
     }
 
+    pub(in crate) fn handle_ack_response(&mut self, ack_id: u16) {
+        // TODO 
+    }
+
+    pub async fn send(&mut self, data: Vec<u8>) -> Result<(), SendError> {
+        let ack_id = self.ack_id_counter;
+        self.ack_id_counter += 1;
+        match frame::encode_payload_frame(self.tube_id, Some(ack_id), data) {
+            Ok(frame_data) => match self.sender.send_data(frame_data.into()).await {
+                Ok(_) => {
+                    // Await for the ack before returning
+                    Ok(())
+                },
+                Err(e) => Err(SendError::TransportError(e)),
+            },
+            Err(e) => Err(SendError::FrameEncodeError(e)),
+        }
+    }
+
     pub fn send_and_forget(&mut self, data: Vec<u8>) -> Result<(), SendError> {
         match frame::encode_payload_frame(self.tube_id, None, data) {
             Ok(frame_data) => match self.sender.try_send_data(frame_data.into()) {
                 Ok(_) => Ok(()),
-                Err(_bytes) => Err(SendError::TransportError),
+                Err(_bytes) => Err(SendError::UnknownTransportError),
             },
             Err(e) => Err(SendError::FrameEncodeError(e)),
         }
