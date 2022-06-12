@@ -1,3 +1,4 @@
+use futures::StreamExt;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -48,18 +49,21 @@ async fn on_new_http_request(
 
   let tube = {
     let mut tube_store = tube_store.lock().unwrap();
-    Tube::new(tube_store.make_new_tube_id(), body_sender, req)
+    Tube::new(tube_store.make_new_tube_id(), body_sender)
   };
 
-  // TODO: Own the `req` here (rather than giving to the Tube) 
-  //       since a single request receives frames for 
-  //       multiple tubes.
-  //       
-  //       First thing: Watch request for ACK frames and 
-  //       distribute them to their corresponding Tube
+  let mut body = req.into_body();
+  tokio::spawn(async move {
+    while let Some(Ok(data)) = body.next().await {
+      println!("Body chunk received!");
+      // TODO: Parse body data as frames, handle parsed frames
+    }
+  });
 
   // TODO: The creation of a request isn't actually the creation of a Tube... 
-  //       The arrival of an EstablishTube frame is!
+  //       The arrival of an EstablishTube frame is! 
+  //
+  //       Move this stuff up into the above while loop
   let mut server_event_queue = server_event_queue.lock().unwrap();
   // TODO: Actually authenticate the tube first...
   server_event_queue.pending_events.push_back(ServerEvent::NewTube(tube));
