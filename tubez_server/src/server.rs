@@ -24,6 +24,52 @@ struct ServerEventQueue {
   waker: Option<Waker>,
 }
 
+struct TubeStore {
+  tube_id_counter: u16,
+}
+impl TubeStore {
+  pub fn make_new_tube_id(&mut self) -> u16 {
+    let new_id = self.tube_id_counter;
+    self.tube_id_counter += 2;
+    new_id
+  }
+}
+
+async fn on_new_http_request(
+  req: hyper::Request<hyper::Body>,
+  server_event_queue: Arc<Mutex<ServerEventQueue>>,
+  tube_store: Arc<Mutex<TubeStore>>,
+) -> Result<
+  hyper::Response<hyper::Body>,
+  std::convert::Infallible,
+> {
+  let (body_sender, body) = hyper::Body::channel();
+  let response: hyper::Response<hyper::Body> = hyper::Response::new(body);
+
+  let tube = {
+    let mut tube_store = tube_store.lock().unwrap();
+    Tube::new(tube_store.make_new_tube_id(), body_sender, req)
+  };
+
+  // TODO: Own the `req` here (rather than giving to the Tube) 
+  //       since a single request receives frames for 
+  //       multiple tubes.
+  //       
+  //       First thing: Watch request for ACK frames and 
+  //       distribute them to their corresponding Tube
+
+  // TODO: The creation of a request isn't actually the creation of a Tube... 
+  //       The arrival of an EstablishTube frame is!
+  let mut server_event_queue = server_event_queue.lock().unwrap();
+  // TODO: Actually authenticate the tube first...
+  server_event_queue.pending_events.push_back(ServerEvent::NewTube(tube));
+  if let Some(waker) = server_event_queue.waker.take() {
+    waker.wake();
+  }
+
+  Ok(response)
+}
+
 pub struct Server {
     event_queue: Arc<Mutex<ServerEventQueue>>,
 }
@@ -36,49 +82,22 @@ impl Server {
           waker: None,
         }));
         let tubez_makeservice = hyper::service::make_service_fn({
-          // TODO: All these move-clones are silly... 
-          //       ...There's gotta be a better way? Maybe just write a custom ServiceFn?
+          // TODO: All these move-clones seem silly... 
+          //       ...There's gotta be a better way? Could we just write a custom ServiceFn?
           let event_queue = event_queue.clone(); 
           move |_conn: &hyper::server::conn::AddrStream| { 
             let event_queue = event_queue.clone(); 
+            let tube_store = Arc::new(Mutex::new(TubeStore { tube_id_counter: 0 }));
             async move {
               // A new http connection has started!
               Ok::<_, std::convert::Infallible>(hyper::service::service_fn({
                 let event_queue = event_queue.clone();
+                let tube_store = tube_store.clone();
                 let mut tube_id_counter = 0;
                 move |req: hyper::Request<hyper::Body>| {
                   let event_queue = event_queue.clone();
-                  async move {
-                    // A new http request has started!
-                    let (body_sender, body) = hyper::Body::channel();
-                    let response: hyper::Response<hyper::Body> = hyper::Response::new(body);
-
-                    let tube_id = tube_id_counter;
-                    tube_id_counter += 2;
-                    let tube = Tube::new(tube_id, body_sender, req);
-
-                    // TODO: Own the `req` here (rather than giving to the Tube) 
-                    //       since a single request receives frames for 
-                    //       multiple tubes.
-                    //       
-                    //       First thing: Watch request for ACK frames and 
-                    //       distribute them to their corresponding Tube
-
-                    let mut event_queue = event_queue.lock().unwrap();
-                    // TODO: Actually authenticate the tube first...
-                    event_queue.pending_events.push_back(ServerEvent::NewTube(tube));
-                    if let Some(waker) = event_queue.waker.take() {
-                      waker.wake();
-                    }
-
-                    // Need an explicit type annotation so the compiler 
-                    // can infer the type of Error
-                    let res: Result<
-                      hyper::Response<hyper::Body>, 
-                      std::convert::Infallible
-                    > = Ok(response);
-                    res
-                  }
+                  let tube_store = tube_store.clone();
+                  on_new_http_request(req, event_queue, tube_store)
                 }
               }))
             }
