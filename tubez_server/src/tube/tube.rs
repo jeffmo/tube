@@ -17,6 +17,7 @@ pub enum SendError {
     UnknownTransportError,
 }
 
+#[derive(Debug)]
 struct TubeEventQueue {
     // TODO: Merge this in with the event statemachine...?
     terminated: bool,
@@ -25,6 +26,7 @@ struct TubeEventQueue {
     waker: Option<Waker>,
 }
 
+#[derive(Debug)]
 pub struct Tube {
     ack_id_counter: u16,
     // TODO: Does this really need to be Arc<Mutex> since all TubeEvents stay 

@@ -4,4 +4,6 @@ members = [
   "tubez_common",
   "tubez_client",
   "tubez_server",
+  "example/client",
+  "example/server",
 ]

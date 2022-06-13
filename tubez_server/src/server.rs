@@ -10,11 +10,13 @@ use hyper;
 
 use crate::tube::Tube;
 
+#[derive(Debug)]
 enum ServerEvent {
   NewTube(Tube),
   Err(hyper::Error),
 }
 
+#[derive(Debug)]
 pub enum ServerError {
   Err(String)
 }
@@ -109,18 +111,15 @@ impl Server {
         });
 
         let threadid = thread::current().id();
-        println!("Starting server (threadid={:?}...", threadid);
         let hyper_server = 
             hyper::Server::bind(&addr)
                 .http2_only(true)
                 .serve(tubez_makeservice);
 
-        println!("Creating Server object...");
         let server = Server {
           event_queue: event_queue.clone(),
         };
 
-        println!("Awaiting error...");
         tokio::spawn(async move {
           if let Err(e) = hyper_server.await {
               let mut event_queue = event_queue.lock().unwrap();
@@ -139,7 +138,6 @@ impl Server {
           }
         });
 
-        println!("Returning Server from ::new()...");
         server
     }
 }

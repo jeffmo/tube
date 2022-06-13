@@ -6,6 +6,7 @@ pub enum StateMachineTransitionResult {
   Invalid(TubeEventTag, TubeEventTag), 
 }
 
+#[derive(Debug)]
 pub struct StateMachine {
   prev_event_tag: TubeEventTag,
 }
