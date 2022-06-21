@@ -1,7 +1,7 @@
 use futures::StreamExt;
 use std::collections::HashMap;
 
-use tubez_client;
+extern crate tubez_client;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() {

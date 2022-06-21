@@ -1,6 +1,6 @@
 use futures::StreamExt;
 
-use tubez_server;
+extern crate tubez_server;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() {
