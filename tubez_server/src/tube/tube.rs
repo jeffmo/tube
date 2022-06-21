@@ -21,14 +21,14 @@ pub enum SendError {
 #[derive(Debug)]
 pub struct Tube {
     ack_id_counter: u16,
-    sender: Arc<Mutex<hyper::body::Sender>>,
+    sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>,
     tube_mgr: Arc<Mutex<TubeManager>>,
     tube_id: u16,
 }
 impl Tube {
     pub(in crate) fn new(
         tube_id: u16,
-        sender: Arc<Mutex<hyper::body::Sender>>, 
+        sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>, 
         tube_mgr: Arc<Mutex<TubeManager>>,
     ) -> Self {
         Tube {
@@ -45,7 +45,7 @@ impl Tube {
         match frame::encode_payload_frame(self.tube_id, Some(ack_id), data) {
             Ok(frame_data) => {
                 {
-                    let mut sender = self.sender.lock().unwrap();
+                    let mut sender = self.sender.lock().await;
                     match sender.send_data(frame_data.into()).await {
                         Ok(_) => (),
                         Err(e) => return Err(SendError::TransportError(e)),
@@ -60,10 +60,11 @@ impl Tube {
         }
     }
 
-    pub fn send_and_forget(&mut self, data: Vec<u8>) -> Result<(), SendError> {
+    pub async fn send_and_forget(&mut self, data: Vec<u8>) -> Result<(), SendError> {
         match frame::encode_payload_frame(self.tube_id, None, data) {
             Ok(frame_data) => {
-                let mut sender = self.sender.lock().unwrap();
+                let mut sender = self.sender.lock().await;
+                // TODO: Switch to async send_data() variant
                 match sender.try_send_data(frame_data.into()) {
                     Ok(_) => Ok(()),
                     Err(_bytes) => Err(SendError::UnknownTransportError),

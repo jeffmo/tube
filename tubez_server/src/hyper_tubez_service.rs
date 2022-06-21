@@ -13,8 +13,8 @@ use crate::server_event::ServerEvent;
 use crate::tube;
 use crate::tube::event::TubeEvent;
 
-fn handle_frame(
-    sender: &Arc<Mutex<hyper::body::Sender>>,
+async fn handle_frame(
+    sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,
     server_ctx: &Arc<Mutex<ServerContext>>,
     tube_store: &mut HashMap<u16, Arc<Mutex<tube::TubeManager>>>, 
     frame: &frame::Frame,
@@ -81,8 +81,8 @@ fn handle_frame(
                         return;
                     },
                 };
-                let mut sender = sender.lock().unwrap();
-                // TODO: Should we make this function async?
+                let mut sender = sender.lock().await;
+                // TODO: Switch to async send_data() variant
                 match sender.try_send_data(frame_data.into()) {
                     Ok(_) => (),
                     Err(_bytes) => {
@@ -136,7 +136,14 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
 
     fn call(&mut self, req: hyper::Request<hyper::Body>) -> Self::Future {
         let (body_sender, body) = hyper::Body::channel();
-        let body_sender = Arc::new(Mutex::new(body_sender));
+        // TODO: !!!!! 
+        //       Use a tokio::sync::Mutex so that locks held while awaiting a data 
+        //       send are safer/less prone to deadlocks as the send itself is .awaited
+        //
+        //       See:
+        //       https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html
+        //
+        let body_sender = Arc::new(tokio::sync::Mutex::new(body_sender));
         let res = hyper::Response::new(body);
 
         println!("Http request received! Headers: {:?}", req.headers());
@@ -180,7 +187,7 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
                         &server_ctx, 
                         &mut tube_store, 
                         frame
-                    );
+                    ).await;
                 }
             }
         });
