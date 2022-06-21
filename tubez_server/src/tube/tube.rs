@@ -64,10 +64,9 @@ impl Tube {
         match frame::encode_payload_frame(self.tube_id, None, data) {
             Ok(frame_data) => {
                 let mut sender = self.sender.lock().await;
-                // TODO: Switch to async send_data() variant
-                match sender.try_send_data(frame_data.into()) {
+                match sender.send_data(frame_data.into()).await {
                     Ok(_) => Ok(()),
-                    Err(_bytes) => Err(SendError::UnknownTransportError),
+                    Err(e) => Err(SendError::TransportError(e)),
                 }
             },
             Err(e) => Err(SendError::FrameEncodeError(e)),

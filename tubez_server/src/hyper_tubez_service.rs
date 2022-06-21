@@ -82,11 +82,10 @@ async fn handle_frame(
                     },
                 };
                 let mut sender = sender.lock().await;
-                // TODO: Switch to async send_data() variant
-                match sender.try_send_data(frame_data.into()) {
+                match sender.send_data(frame_data.into()).await {
                     Ok(_) => (),
-                    Err(_bytes) => {
-                        eprintln!("Error sending ack frame to client!");
+                    Err(e) => {
+                        eprintln!("Error sending ack frame to client: {:?}", e);
                         return
                     },
                 }
