@@ -1,36 +1,44 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::Mutex;
+
 use hyper;
 
-pub enum ClientConnectError {
+use crate::channel::Channel;
+use crate::channel::ChannelConnectError;
+
+pub enum MakeChannelError {
+  ChannelConnectError(ChannelConnectError)
 }
 
-pub struct Client;
+pub struct Client {
+  channels: Vec<Arc<Mutex<Channel>>>,
+  hyper_client: hyper::Client<hyper::client::HttpConnector>,
+}
 impl Client {
-  pub async fn new() -> Result<Self, ClientConnectError> {
+  pub fn new() -> Self {
     let hyper_client: hyper::Client<hyper::client::HttpConnector> = 
       hyper::Client::builder()
         .http2_only(true)
         .build_http();
 
-    let (mut body_sender, body) = hyper::Body::channel();
-    let req = hyper::Request::builder()
-      .method(hyper::Method::POST)
-      .uri("http://127.0.0.1:3000/")
-      .body(body)
-      .unwrap();
+    Client {
+      channels: vec![],
+      hyper_client,
+    }
+  }
 
-    println!("Sending request...");
-    match hyper_client.request(req).await {
-      Ok(response) => {
-        println!("Request sent! Sending more stuff...");
-        body_sender.try_send_data("test".into());
-      },
-      Err(e) => {
-        println!("Err! {:?}", e);
-      },
+  pub async fn make_tube_channel(
+    &mut self,
+    headers: HashMap<String, String>,
+  ) -> Result<Arc<Mutex<Channel>>, ChannelConnectError> {
+    let channel = match Channel::new(&self.hyper_client).await {
+        Ok(channel) => channel,
+        Err(e) => return Err(e),
     };
-
-    Ok(Client {
-    })
+    let channel = Arc::new(Mutex::new(channel));
+    self.channels.push(channel.clone());
+    Ok(channel)
   }
 }
 

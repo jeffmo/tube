@@ -9,6 +9,7 @@ use tubez_common::frame;
 use crate::tube::event;
 use crate::tube::event::TubeEvent;
 use crate::tube::event::TubeEvent_StreamError;
+use crate::tube::TubeManager;
 
 #[derive(Debug)]
 pub enum SendError {
@@ -18,55 +19,42 @@ pub enum SendError {
 }
 
 #[derive(Debug)]
-struct TubeEventQueue {
-    // TODO: Merge this in with the event statemachine...?
-    terminated: bool,
-    pending_events: VecDeque<TubeEvent>,
-    state_machine: event::StateMachine,
-    waker: Option<Waker>,
-}
-
-#[derive(Debug)]
 pub struct Tube {
     ack_id_counter: u16,
-    // TODO: Does this really need to be Arc<Mutex> since all TubeEvents stay 
-    //       on a single thread?
-    event_queue: Arc<Mutex<TubeEventQueue>>,
-    sender: hyper::body::Sender,
+    sender: Arc<Mutex<hyper::body::Sender>>,
+    tube_mgr: Arc<Mutex<TubeManager>>,
     tube_id: u16,
 }
 impl Tube {
     pub(in crate) fn new(
         tube_id: u16,
-        sender: hyper::body::Sender, 
+        sender: Arc<Mutex<hyper::body::Sender>>, 
+        tube_mgr: Arc<Mutex<TubeManager>>,
     ) -> Self {
         Tube {
             ack_id_counter: 0,
-            event_queue: Arc::new(Mutex::new(TubeEventQueue {
-                pending_events: VecDeque::new(),
-                state_machine: event::StateMachine::new(),
-                terminated: false,
-                waker: None,
-            })),
             sender,
+            tube_mgr,
             tube_id,
         }
-    }
-
-    pub(in crate) fn handle_ack_response(&mut self, ack_id: u16) {
-        // TODO 
     }
 
     pub async fn send(&mut self, data: Vec<u8>) -> Result<(), SendError> {
         let ack_id = self.ack_id_counter;
         self.ack_id_counter += 1;
         match frame::encode_payload_frame(self.tube_id, Some(ack_id), data) {
-            Ok(frame_data) => match self.sender.send_data(frame_data.into()).await {
-                Ok(_) => {
-                    // Await for the ack before returning
-                    Ok(())
-                },
-                Err(e) => Err(SendError::TransportError(e)),
+            Ok(frame_data) => {
+                {
+                    let mut sender = self.sender.lock().unwrap();
+                    match sender.send_data(frame_data.into()).await {
+                        Ok(_) => (),
+                        Err(e) => return Err(SendError::TransportError(e)),
+                    }
+                };
+
+                // TODO: Await here for the return of an ACK from the client
+
+                Ok(())
             },
             Err(e) => Err(SendError::FrameEncodeError(e)),
         }
@@ -74,9 +62,12 @@ impl Tube {
 
     pub fn send_and_forget(&mut self, data: Vec<u8>) -> Result<(), SendError> {
         match frame::encode_payload_frame(self.tube_id, None, data) {
-            Ok(frame_data) => match self.sender.try_send_data(frame_data.into()) {
-                Ok(_) => Ok(()),
-                Err(_bytes) => Err(SendError::UnknownTransportError),
+            Ok(frame_data) => {
+                let mut sender = self.sender.lock().unwrap();
+                match sender.try_send_data(frame_data.into()) {
+                    Ok(_) => Ok(()),
+                    Err(_bytes) => Err(SendError::UnknownTransportError),
+                }
             },
             Err(e) => Err(SendError::FrameEncodeError(e)),
         }
@@ -89,21 +80,22 @@ impl futures::stream::Stream for Tube {
         self: core::pin::Pin<&mut Self>,
         cx: &mut futures::task::Context,
     ) -> futures::task::Poll<Option<Self::Item>> {
-        let mut event_queue = self.event_queue.lock().unwrap();
-        event_queue.waker = Some(cx.waker().clone());
+        //let mut event_queue = self.event_queue.lock().unwrap();
+        let mut tube_mgr = self.tube_mgr.lock().unwrap();
+        tube_mgr.waker = Some(cx.waker().clone());
 
-        if event_queue.terminated {
+        if tube_mgr.terminated {
             return futures::task::Poll::Ready(None);
         }
 
-        match event_queue.pending_events.pop_front() {
-            Some(tube_event) => match event_queue.state_machine.transition_to(&tube_event) {
+        match tube_mgr.pending_events.pop_front() {
+            Some(tube_event) => match tube_mgr.state_machine.transition_to(&tube_event) {
                 event::StateMachineTransitionResult::Valid => {
                     futures::task::Poll::Ready(Some(tube_event))
                 },
                 event::StateMachineTransitionResult::Invalid(from, to) => {
                     // TODO: Print some kind of error?
-                    event_queue.terminated = true;
+                    tube_mgr.terminated = true;
 
                     let error_event = TubeEvent::StreamError(
                         TubeEvent_StreamError::InvalidTubeEventTransition(from, to)
@@ -120,8 +112,8 @@ impl futures::stream::Stream for Tube {
 #[cfg(test)]
 impl Tube {
     pub fn set_test_events(&mut self, events: Vec<TubeEvent>) {
-        let mut event_queue = self.event_queue.lock().unwrap();
-        event_queue.pending_events = VecDeque::from(events);
+        let mut tube_mgr = self.tube_mgr.lock().unwrap();
+        tube_mgr.pending_events = VecDeque::from(events);
     }
 }
 
