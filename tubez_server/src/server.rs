@@ -1,14 +1,9 @@
-use futures::StreamExt;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::task::Waker;
 
 use hyper;
-use hyper::body::HttpBody;
-
-use tubez_common::frame;
 
 use crate::hyper_tubez_service::TubezMakeSvc;
 use crate::server_context::ServerContext;
@@ -27,7 +22,6 @@ pub struct Server {
 impl Server {
     pub async fn new(addr: &SocketAddr) -> Self {
         let server_ctx = Arc::new(Mutex::new(ServerContext {
-            channel_id_counter: 0,
             is_complete: false,
             pending_events: VecDeque::new(),
             waker: None,

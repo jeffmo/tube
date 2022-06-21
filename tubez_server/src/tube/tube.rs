@@ -2,7 +2,6 @@ use futures;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::task::Waker;
 
 use tubez_common::frame;
 
