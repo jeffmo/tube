@@ -10,7 +10,7 @@ use tubez_common::frame;
 use crate::server_context::ServerContext;
 use crate::server_event::ServerEvent;
 use crate::tube;
-use crate::tube::event::TubeEvent;
+use crate::tube::TubeEvent;
 
 async fn handle_frame(
     sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,

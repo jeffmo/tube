@@ -5,9 +5,9 @@ use std::sync::Mutex;
 
 use tubez_common::frame;
 
-use crate::tube::event;
-use crate::tube::event::TubeEvent;
-use crate::tube::event::TubeEvent_StreamError;
+use super::tube_event;
+use super::tube_event::TubeEvent;
+use super::tube_event::TubeEvent_StreamError;
 use crate::tube::TubeManager;
 
 #[derive(Debug)]
@@ -89,10 +89,10 @@ impl futures::stream::Stream for Tube {
 
         match tube_mgr.pending_events.pop_front() {
             Some(tube_event) => match tube_mgr.state_machine.transition_to(&tube_event) {
-                event::StateMachineTransitionResult::Valid => {
+                tube_event::StateMachineTransitionResult::Valid => {
                     futures::task::Poll::Ready(Some(tube_event))
                 },
-                event::StateMachineTransitionResult::Invalid(from, to) => {
+                tube_event::StateMachineTransitionResult::Invalid(from, to) => {
                     // TODO: Print some kind of error?
                     tube_mgr.terminated = true;
 
