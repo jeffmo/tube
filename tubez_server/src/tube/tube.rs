@@ -1,10 +1,13 @@
 use futures;
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use tubez_common::frame;
 
+use super::sendack_future::SendAckFuture;
+use super::sendack_future::SendAckFutureContext;
 use super::tube_event;
 use super::tube_event::TubeEvent;
 use super::tube_event::TubeEvent_StreamError;
@@ -12,6 +15,7 @@ use crate::tube::TubeManager;
 
 #[derive(Debug)]
 pub enum SendError {
+    AckIdAlreadyInUseInternalError,
     TransportError(hyper::Error),
     FrameEncodeError(frame::FrameEncodeError),
     UnknownTransportError,
@@ -19,7 +23,9 @@ pub enum SendError {
 
 #[derive(Debug)]
 pub struct Tube {
+    available_ackids: VecDeque<u16>,
     ack_id_counter: u16,
+    sendacks: HashMap<u16, Arc<Mutex<SendAckFutureContext>>>,
     sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>,
     tube_mgr: Arc<Mutex<TubeManager>>,
     tube_id: u16,
@@ -32,24 +38,55 @@ impl Tube {
     ) -> Self {
         Tube {
             ack_id_counter: 0,
+            available_ackids: VecDeque::new(),
+            sendacks: HashMap::new(),
             sender,
             tube_mgr,
             tube_id,
         }
     }
 
+    fn take_ackid(&mut self) -> u16 {
+        match self.available_ackids.pop_front() {
+            Some(ack_id) => ack_id,
+            None => {
+                let ack_id = self.ack_id_counter;
+                if ack_id == u16::MAX {
+                    self.ack_id_counter = 0;
+                } else {
+                    self.ack_id_counter += 1;
+                }
+                ack_id
+            }
+        }
+    }
+
     pub async fn send(&mut self, data: Vec<u8>) -> Result<(), SendError> {
-        let ack_id = self.ack_id_counter;
-        self.ack_id_counter += 1;
+        let ack_id = self.take_ackid();
         match frame::encode_payload_frame(self.tube_id, Some(ack_id), data) {
             Ok(frame_data) => {
+                let sendack_ctx = Arc::new(Mutex::new(SendAckFutureContext {
+                    ack_received: false,
+                }));
+                if let Err(_) = self.sendacks.try_insert(ack_id, sendack_ctx.clone()) {
+                    return Err(SendError::AckIdAlreadyInUseInternalError)
+                }
+
                 {
                     let mut sender = self.sender.lock().await;
                     match sender.send_data(frame_data.into()).await {
                         Ok(_) => (),
-                        Err(e) => return Err(SendError::TransportError(e)),
+                        Err(e) => {
+                            self.sendacks.remove(&ack_id);
+                            return Err(SendError::TransportError(e))
+                        },
                     }
                 };
+
+                SendAckFuture {
+                    ctx: sendack_ctx.clone(),
+                }.await;
+                self.sendacks.remove(&ack_id);
 
                 // TODO: Await here for the return of an ACK from the client
 
