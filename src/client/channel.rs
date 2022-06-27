@@ -2,12 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use hyper;
 use hyper::body::HttpBody;
 
 use crate::common::frame;
-use crate::common::tube::Tube;
-use crate::common::tube::TubeManager;
+use crate::common::tube;
 
 #[derive(Debug)]
 pub enum ChannelConnectError {
@@ -24,10 +22,10 @@ pub enum MakeTubeError {
 pub struct Channel {
     body_sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>,
     tube_id_counter: u16,
-    tube_managers: Arc<Mutex<HashMap<u16, Arc<Mutex<TubeManager>>>>>,
+    tube_managers: Arc<Mutex<HashMap<u16, Arc<Mutex<tube::TubeManager>>>>>,
 }
 impl Channel {
-    pub(in crate) async fn new(
+    pub(in crate::client) async fn new(
         hyper_client: &hyper::Client<hyper::client::HttpConnector>,
     ) -> Result<Self, ChannelConnectError> {
         let (body_sender, req_body) = hyper::Body::channel();
@@ -66,7 +64,7 @@ impl Channel {
     pub async fn make_tube(
         &mut self, 
         headers: HashMap<String, String>,
-    ) -> Result<Tube, MakeTubeError> {
+    ) -> Result<tube::Tube, MakeTubeError> {
         let tube_id = self.new_tube_id();
         let estab_tube_frame = match frame::encode_establish_tube_frame(tube_id, headers) {
             Ok(data) => data,
@@ -85,8 +83,8 @@ impl Channel {
         // TODO: Await the return of an EstablishTube frame from the server here 
         //       before creating a Tube and returning it.
 
-        let tube_mgr = Arc::new(Mutex::new(TubeManager::new()));
-        let tube = Tube::new_on_client(tube_id, self.body_sender.clone(), tube_mgr.clone());
+        let tube_mgr = Arc::new(Mutex::new(tube::TubeManager::new()));
+        let tube = tube::Tube::new_on_client(tube_id, self.body_sender.clone(), tube_mgr.clone());
         let mut tube_managers = self.tube_managers.lock().unwrap();
         match tube_managers.try_insert(tube_id, tube_mgr) {
           Ok(_) => Ok(tube),

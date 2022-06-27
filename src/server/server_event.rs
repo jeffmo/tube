@@ -1,4 +1,4 @@
-use crate::server::tube::Tube;
+use crate::common::tube::Tube;
 
 #[derive(Debug)]
 pub enum ServerEvent {

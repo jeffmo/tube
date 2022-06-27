@@ -3,13 +3,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use hyper;
 use hyper::body::HttpBody;
 
 use crate::common::frame;
 use crate::common::tube;
-use crate::server::server_context::ServerContext;
-use crate::server::server_event::ServerEvent;
+use super::server_context::ServerContext;
+use super::server_event::ServerEvent;
 
 async fn handle_frame(
     sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,
@@ -109,11 +108,11 @@ async fn handle_frame(
     }
 }
 
-pub(in crate) struct TubezHttpReq {
+pub(in crate::server) struct TubezHttpReq {
     server_ctx: Arc<Mutex<ServerContext>>,
 }
 impl TubezHttpReq {
-    pub(in crate) fn new(server_ctx: Arc<Mutex<ServerContext>>) -> Self {
+    fn new(server_ctx: Arc<Mutex<ServerContext>>) -> Self {
         TubezHttpReq {
             server_ctx,
         }
@@ -193,11 +192,11 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
     }
 }
 
-pub(in crate) struct TubezMakeSvc {
+pub(in crate::server) struct TubezMakeSvc {
     server_ctx: Arc<Mutex<ServerContext>>,
 }
 impl TubezMakeSvc {
-    pub(in crate) fn new(server_ctx: Arc<Mutex<ServerContext>>) -> Self {
+    pub fn new(server_ctx: Arc<Mutex<ServerContext>>) -> Self {
         TubezMakeSvc {
             server_ctx,
         }

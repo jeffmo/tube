@@ -3,12 +3,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use hyper;
-
-use crate::server::hyper_tubez_service::TubezMakeSvc;
-use crate::server::server_context::ServerContext;
-pub use crate::server::server_event::ServerEvent;
-use crate::server::tube::Tube;
+use crate::common::tube::Tube;
+use super::hyper_tubez_service::TubezMakeSvc;
+use super::server_context::ServerContext;
+use super::server_event::ServerEvent;
 
 #[derive(Debug)]
 pub enum ServerError {
