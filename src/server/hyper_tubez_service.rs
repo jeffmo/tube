@@ -22,7 +22,43 @@ async fn handle_frame(
         frame::Frame::ClientHasFinishedSending {
             tube_id,
         } => {
-            // TODO
+            let tube_mgr = match tube_store.get(tube_id) {
+                Some(tube_ctx) => tube_ctx,
+                None => {
+                    // TODO: Hmm...send back some kind of an error to the client?
+                    eprintln!(
+                        "Received a Payload frame for Tube({:?}) that we aren't aware of!", 
+                        tube_id
+                    );
+                    return;
+                },
+            };
+
+            let mut tube_mgr = tube_mgr.lock().unwrap();
+            let new_state = {
+                use tube::TubeCompletionState::*;
+                match tube_mgr.completion_state {
+                    Open => ClientHasFinishedSending,
+                    ServerHasFinishedSending => Closed,
+                    ClientHasFinishedSending => {
+                        eprintln!("Client sent ClientHasFinishedSending frame twice!");
+                        ClientHasFinishedSending
+                    },
+                    Closed => {
+                        eprintln!("Client sent ClientHasFinishedSending frame twice!");
+                        Closed
+                    },
+                }
+            };
+            if tube_mgr.completion_state != new_state {
+                tube_mgr.completion_state = new_state;
+                if tube_mgr.completion_state == tube::TubeCompletionState::ClientHasFinishedSending {
+                    tube_mgr.pending_events.push_back(tube::TubeEvent::ClientHasFinishedSending);
+                }
+                if let Some(waker) = tube_mgr.waker.take() {
+                  waker.wake();
+                }
+            }
         },
         frame::Frame::Drain => {
             // TODO
@@ -31,9 +67,13 @@ async fn handle_frame(
             tube_id, 
             headers,
         } => {
-            // TODO: First Authenticate here...
+            let mut tube_mgr = tube::TubeManager::new();
 
-            let tube_mgr = Arc::new(Mutex::new(tube::TubeManager::new()));
+            // TODO: Actually Authenticate... 
+            //       Probably want to do this in TubeManager::new()? Maybe? Not sure...
+            tube_mgr.state_machine.transition_to(&tube::TubeEvent::AuthenticatedAndReady);
+
+            let tube_mgr = Arc::new(Mutex::new(tube_mgr));
 
             println!("      Storing TubeManager...");
             if let Err(e) = tube_store.try_insert(*tube_id, tube_mgr.clone()) {
@@ -127,10 +167,9 @@ async fn handle_frame(
                 }
             }
         },
-        frame::Frame::ServerHasFinishedSending {
-            tube_id,
-        } => {
-            // TODO
+        frame::Frame::ServerHasFinishedSending { .. } => {
+            eprintln!("Received a ServerHasFinishedSending frame from the client...uhhh...");
+            return;
         },
     }
 }
@@ -206,6 +245,7 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
                     ).await;
                 }
             }
+            println!("Stream of httprequest data from client has ended!");
         });
 
         future::ok(res)

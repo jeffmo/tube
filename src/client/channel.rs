@@ -16,7 +16,8 @@ async fn handle_frame(
         frame::Frame::ClientHasFinishedSending {
             tube_id,
         } => {
-            // TODO
+            eprintln!("Received a ClientHasFinishedSending frame from the server...uhhh...");
+            return;
         },
         frame::Frame::Drain => {
             // TODO
@@ -109,7 +110,45 @@ async fn handle_frame(
         frame::Frame::ServerHasFinishedSending {
             tube_id,
         } => {
-            // TODO
+            let tube_mgr = {
+                let tube_mgrs = tube_managers.lock().unwrap();
+                match tube_mgrs.get(tube_id) {
+                    Some(tube_ctx) => tube_ctx.clone(),
+                    None => {
+                        // TODO: Hmm...send back some kind of an error to the client?
+                        eprintln!(
+                            "Received a ServerHasFinishedSending frame for Tube({:?}) that we aren't aware of!", 
+                            tube_id
+                        );
+                        return;
+                    },
+                }
+            };
+            let mut tube_mgr = tube_mgr.lock().unwrap();
+            let new_state = {
+                use tube::TubeCompletionState::*;
+                match tube_mgr.completion_state {
+                    Open => ServerHasFinishedSending,
+                    ClientHasFinishedSending => Closed,
+                    ServerHasFinishedSending => {
+                        eprintln!("Server sent ServerHasFinishedSending frame twice!");
+                        ServerHasFinishedSending
+                    },
+                    Closed => {
+                        eprintln!("Server sent ServerHasFinishedSending frame twice!");
+                        Closed
+                    },
+                }
+            };
+            if tube_mgr.completion_state != new_state {
+                tube_mgr.completion_state = new_state;
+                if tube_mgr.completion_state == tube::TubeCompletionState::ServerHasFinishedSending {
+                    tube_mgr.pending_events.push_back(tube::TubeEvent::ServerHasFinishedSending);
+                }
+                if let Some(waker) = tube_mgr.waker.take() {
+                  waker.wake();
+                }
+            }
         },
     }
 }

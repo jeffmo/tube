@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use futures::StreamExt;
+
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() {
     println!("Creating client...");
@@ -27,9 +29,10 @@ async fn main() {
     tube1.send("tube1 data!".into()).await.unwrap();
     println!("received ack for data sent on tube1! Marking tube as has_finished_sending...");
     tube1.has_finished_sending().await.unwrap();
-    println!("Tube now marked as has_finished_sending! Creating tube2...");
+    println!("Tube now marked as has_finished_sending!");
 
-    println!("Waiting a bit before 2nd tube...");
+    /*
+    println!("Waiting a bit before creating 2nd tube...");
     // TODO: Deleting this kills the transport... Probably need to gracefully 
     //       kill/end/await all the Channels in a destructor or something?
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -42,6 +45,13 @@ async fn main() {
             return
         },
     };
+    */
+
+    println!("Waiting on tube events...");
+    while let Some(tube_event) = tube1.next().await {
+      println!("Tubeevent: {:?}", tube_event);
+    }
+    println!("No more tube events!");
 
     println!("Waiting a bit before exiting...");
     // TODO: Deleting this kills the transport... Probably need to gracefully 

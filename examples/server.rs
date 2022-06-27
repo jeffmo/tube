@@ -15,6 +15,14 @@ async fn main() {
           tokio::spawn(async move {
             while let Some(tube_event) = tube.next().await {
               println!("TubeEvent: {:?}", tube_event);
+              match tube_event {
+                tubez::tube::TubeEvent::ClientHasFinishedSending => {
+                  println!("  responding with ServerHasFinishedSending...");
+                  tube.has_finished_sending().await.unwrap();
+                  println!("    sent!");
+                },
+                _ => (),
+              }
             }
             println!("No more tube events!");
           });

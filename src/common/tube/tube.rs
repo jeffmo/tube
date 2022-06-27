@@ -9,14 +9,22 @@ use super::sendack_future::SendAckFutureContext;
 use super::tube_event;
 use super::tube_event::TubeEvent;
 use super::tube_event::TubeEvent_StreamError;
-use super::TubeManager;
+use super::tube_manager::TubeCompletionState;
+use super::tube_manager::TubeManager;
 
 #[derive(Debug)]
 pub enum SendError {
     AckIdAlreadyInUseInternalError,
-    TransportError(hyper::Error),
     FrameEncodeError(frame::FrameEncodeError),
+    TransportError(hyper::Error),
     UnknownTransportError,
+}
+
+#[derive(Debug)]
+pub enum HasFinishedSendingError {
+    AlreadyMarkedAsFinishedSending,
+    FrameEncodeError(frame::FrameEncodeError),
+    TransportError(hyper::Error),
 }
 
 #[derive(Debug)]
@@ -39,7 +47,7 @@ impl Tube {
         return self.tube_id;
     }
 
-    pub async fn has_finished_sending(&self) -> Result<(), SendError> {
+    pub async fn has_finished_sending(&self) -> Result<(), HasFinishedSendingError> {
         let maybe_frame_data = match self.tube_owner {
             TubeOwner::Client => 
                 frame::encode_client_has_finished_sending_frame(self.tube_id),
@@ -48,12 +56,33 @@ impl Tube {
         };
         let frame_data = match maybe_frame_data {
             Ok(data) => data,
-            Err(e) => return Err(SendError::FrameEncodeError(e)),
+            Err(e) => return Err(HasFinishedSendingError::FrameEncodeError(e)),
+        };
+        {
+            let mut tube_mgr = self.tube_manager.lock().unwrap();
+            use TubeCompletionState::*;
+            use TubeOwner::*;
+            match (&tube_mgr.completion_state, &self.tube_owner) {
+                (&Open, &Client) => 
+                    tube_mgr.completion_state = ClientHasFinishedSending,
+                (&Open, &Server) => 
+                    tube_mgr.completion_state = ServerHasFinishedSending,
+                (&ClientHasFinishedSending, &Server) | (&ServerHasFinishedSending, &Client) => {
+                    tube_mgr.completion_state = Closed;
+                    if let Some(waker) = tube_mgr.waker.take() {
+                        waker.wake();
+                    }
+                },
+                (&ClientHasFinishedSending, &Client) | 
+                    (&ServerHasFinishedSending, &Server) |
+                    (&Closed, _) => 
+                    return Err(HasFinishedSendingError::AlreadyMarkedAsFinishedSending),
+            };
         };
         let mut sender = self.sender.lock().await;
         match sender.send_data(frame_data.into()).await {
             Ok(_) => Ok(()),
-            Err(e) => return Err(SendError::TransportError(e)),
+            Err(e) => return Err(HasFinishedSendingError::TransportError(e)),
         }
     }
 
@@ -172,10 +201,6 @@ impl futures::stream::Stream for Tube {
         let mut tube_mgr = self.tube_manager.lock().unwrap();
         tube_mgr.waker = Some(cx.waker().clone());
 
-        if tube_mgr.terminated {
-            return futures::task::Poll::Ready(None);
-        }
-
         match tube_mgr.pending_events.pop_front() {
             Some(tube_event) => match tube_mgr.state_machine.transition_to(&tube_event) {
                 tube_event::StateMachineTransitionResult::Valid => {
@@ -192,7 +217,13 @@ impl futures::stream::Stream for Tube {
                 }
             },
 
-            None => futures::task::Poll::Pending
+            None => {
+                use TubeCompletionState::*;
+                match tube_mgr.completion_state {
+                    Open | ClientHasFinishedSending => futures::task::Poll::Pending,
+                    Closed | ServerHasFinishedSending => futures::task::Poll::Ready(None),
+                }
+            }
         }
     }
 }

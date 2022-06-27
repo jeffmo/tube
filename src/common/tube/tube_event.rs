@@ -14,6 +14,7 @@ pub enum TubeEvent {
     ClientHasFinishedSending,
     Payload(Vec<u8>),
     StreamError(TubeEvent_StreamError),
+    ServerHasFinishedSending,
     ServerMustDrain(DrainReason),
 }
 
@@ -26,6 +27,7 @@ pub enum TubeEventTag {
     Payload,
     ClientHasFinishedSending,
     StreamError,
+    ServerHasFinishedSending,
     ServerMustDrain,
 }
 impl From<&TubeEvent> for TubeEventTag {
@@ -36,6 +38,7 @@ impl From<&TubeEvent> for TubeEventTag {
       TubeEvent::ClientHasFinishedSending => TubeEventTag::ClientHasFinishedSending,
       TubeEvent::StreamError(_) => TubeEventTag::StreamError,
       TubeEvent::ServerMustDrain(_) => TubeEventTag::ServerMustDrain,
+      TubeEvent::ServerHasFinishedSending => TubeEventTag::ServerHasFinishedSending,
     }
   }
 }
@@ -71,25 +74,28 @@ impl StateMachine {
         },
 
         (AuthenticatedAndReady, 
-          Payload | ClientHasFinishedSending | StreamError | ServerMustDrain) => {
+          Payload | ClientHasFinishedSending | StreamError | 
+          ServerHasFinishedSending | ServerMustDrain) => {
           self.prev_event_tag = next_event_tag;
           StateMachineTransitionResult::Valid
         },
 
         (Payload,
-          Payload | ClientHasFinishedSending | StreamError | ServerMustDrain) => {
+          Payload | ClientHasFinishedSending | StreamError | 
+          ServerHasFinishedSending | ServerMustDrain) => {
           self.prev_event_tag = next_event_tag;
           StateMachineTransitionResult::Valid
         },
 
         (ClientHasFinishedSending,
-          StreamError | ServerMustDrain) => {
+          StreamError | ServerHasFinishedSending | ServerMustDrain) => {
           self.prev_event_tag = next_event_tag;
           StateMachineTransitionResult::Valid
         },
 
         (ServerMustDrain, 
-          Payload | ClientHasFinishedSending | StreamError) => {
+          Payload | ClientHasFinishedSending | ServerHasFinishedSending | 
+          StreamError) => {
           self.prev_event_tag = next_event_tag;
           StateMachineTransitionResult::Valid
         },
