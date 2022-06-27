@@ -11,7 +11,6 @@ pub enum FrameEncodeError {
     HeaderJsonEncodeError(serde_json::error::Error),
 }
 
-#[cfg(feature = "client")]
 pub fn encode_client_has_finished_sending_frame(
     tube_id: u16,
 ) -> Result<Vec<u8>, FrameEncodeError> {
@@ -111,7 +110,6 @@ pub fn encode_payload_ack_frame(
     ])
 }
 
-#[cfg(feature = "server")]
 pub fn encode_server_has_finished_sending_frame(
     tube_id: u16,
 ) -> Result<Vec<u8>, FrameEncodeError> {

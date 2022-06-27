@@ -35,6 +35,28 @@ pub struct Tube {
     tube_owner: TubeOwner,
 }
 impl Tube {
+    pub fn get_id(&self) -> u16 {
+        return self.tube_id;
+    }
+
+    pub async fn has_finished_sending(&self) -> Result<(), SendError> {
+        let maybe_frame_data = match self.tube_owner {
+            TubeOwner::Client => 
+                frame::encode_client_has_finished_sending_frame(self.tube_id),
+            TubeOwner::Server => 
+                frame::encode_server_has_finished_sending_frame(self.tube_id),
+        };
+        let frame_data = match maybe_frame_data {
+            Ok(data) => data,
+            Err(e) => return Err(SendError::FrameEncodeError(e)),
+        };
+        let mut sender = self.sender.lock().await;
+        match sender.send_data(frame_data.into()).await {
+            Ok(_) => Ok(()),
+            Err(e) => return Err(SendError::TransportError(e)),
+        }
+    }
+
     fn new(
         tube_owner: TubeOwner,
         tube_id: u16,
@@ -57,7 +79,7 @@ impl Tube {
         sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>, 
         tube_manager: Arc<Mutex<TubeManager>>,
     ) -> Self {
-      Self::new(TubeOwner::Client, tube_id, sender, tube_manager)
+        Self::new(TubeOwner::Client, tube_id, sender, tube_manager)
     }
 
     #[cfg(feature = "server")]
@@ -66,26 +88,7 @@ impl Tube {
         sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>, 
         tube_manager: Arc<Mutex<TubeManager>>,
     ) -> Self {
-      Self::new(TubeOwner::Server, tube_id, sender, tube_manager)
-    }
-
-    fn take_ackid(&mut self) -> u16 {
-        match self.available_ackids.pop_front() {
-            Some(ack_id) => ack_id,
-            None => {
-                let ack_id = self.ack_id_counter;
-                if ack_id == u16::MAX {
-                    self.ack_id_counter = 0;
-                } else {
-                    self.ack_id_counter += 1;
-                }
-                ack_id
-            }
-        }
-    }
-
-    pub fn get_id(&self) -> u16 {
-        return self.tube_id;
+        Self::new(TubeOwner::Server, tube_id, sender, tube_manager)
     }
 
     pub async fn send(&mut self, data: Vec<u8>) -> Result<(), SendError> {
@@ -141,6 +144,21 @@ impl Tube {
                 }
             },
             Err(e) => Err(SendError::FrameEncodeError(e)),
+        }
+    }
+
+    fn take_ackid(&mut self) -> u16 {
+        match self.available_ackids.pop_front() {
+            Some(ack_id) => ack_id,
+            None => {
+                let ack_id = self.ack_id_counter;
+                if ack_id == u16::MAX {
+                    self.ack_id_counter = 0;
+                } else {
+                    self.ack_id_counter += 1;
+                }
+                ack_id
+            }
         }
     }
 }

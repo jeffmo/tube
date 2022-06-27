@@ -11,8 +11,8 @@ pub enum TubeEvent_StreamError {
 #[derive(Clone, Debug, PartialEq)]
 pub enum TubeEvent {
     AuthenticatedAndReady,
-    Payload(Vec<u8>),
     ClientHasFinishedSending,
+    Payload(Vec<u8>),
     StreamError(TubeEvent_StreamError),
     ServerMustDrain(DrainReason),
 }
