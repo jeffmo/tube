@@ -1,8 +1,0 @@
-[workspace]
-members = [
-  "tubez_common",
-  "tubez_client",
-  "tubez_server",
-  "examples/*",
-  "tubez",
-]
