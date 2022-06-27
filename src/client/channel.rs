@@ -7,6 +7,113 @@ use hyper::body::HttpBody;
 use crate::common::frame;
 use crate::common::tube;
 
+async fn handle_frame(
+    sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,
+    tube_managers: &Arc<Mutex<HashMap<u16, Arc<Mutex<tube::TubeManager>>>>>, 
+    frame: &frame::Frame,
+) {
+    match frame {
+        frame::Frame::ClientHasFinishedSending {
+            tube_id,
+        } => {
+            // TODO
+        },
+        frame::Frame::Drain => {
+            // TODO
+        },
+        frame::Frame::EstablishTube { 
+            tube_id, 
+            headers,
+        } => {
+            // TODO
+        },
+        frame::Frame::Payload {
+            tube_id,
+            ack_id,
+            data,
+        } => {
+            let mut tube_mgr = {
+                let tube_mgrs = tube_managers.lock().unwrap();
+                match tube_mgrs.get(tube_id) {
+                    Some(tube_ctx) => tube_ctx.clone(),
+                    None => {
+                        // TODO: Hmm...send back some kind of an error to the client?
+                        eprintln!(
+                            "Received a Payload frame for Tube({:?}) that we aren't aware of!", 
+                            tube_id
+                        );
+                        return;
+                    },
+                }
+            };
+
+            // If an ack was requested, send one...
+            if let Some(ack_id) = ack_id {
+                let frame_data = match frame::encode_payload_ack_frame(*tube_id, *ack_id) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        eprintln!("Error encoding Ack frame: {:?}", e);
+                        return;
+                    },
+                };
+                let mut sender = sender.lock().await;
+                match sender.send_data(frame_data.into()).await {
+                    Ok(_) => (),
+                    Err(e) => {
+                        eprintln!("Error sending ack frame to client: {:?}", e);
+                        return
+                    },
+                }
+            }
+
+            let mut tube_mgr = tube_mgr.lock().unwrap();
+            tube_mgr.pending_events.push_back(tube::TubeEvent::Payload(data.to_vec()));
+            if let Some(waker) = tube_mgr.waker.take() {
+                waker.wake();
+            }
+        },
+        frame::Frame::PayloadAck {
+            tube_id,
+            ack_id,
+        } => {
+            let mut tube_mgr = {
+              let tube_mgrs = tube_managers.lock().unwrap();
+              match tube_mgrs.get(tube_id) {
+                    Some(tube_mgr) => tube_mgr.clone(),
+                    None => {
+                        eprintln!("Received a PayloadAck frame from the client for tube_id={:?}, which is not a Tube the server is tracking!", tube_id);
+                        return;
+                    }
+              }
+            };
+
+            let sendack_ctx = {
+                let tube_mgr = tube_mgr.lock().unwrap();
+                match tube_mgr.sendacks.get(ack_id) {
+                    Some(ctx) => ctx.clone(),
+                    None => {
+                        eprintln!("Received a PayloadAck(id={:?}) for Tube(id={:?}), but this is not an ack_id this tube is tracking!", ack_id, tube_id);
+                        return;
+                    }
+                }
+            };
+
+            {
+                let mut sendack_ctx = sendack_ctx.lock().unwrap();
+                sendack_ctx.ack_received = true;
+                if let Some(waker) = sendack_ctx.waker.take() {
+                  waker.wake();
+                }
+            }
+        },
+        frame::Frame::ServerHasFinishedSending {
+            tube_id,
+        } => {
+            // TODO
+        },
+    }
+}
+
 #[derive(Debug)]
 pub enum ChannelConnectError {
     InitError(hyper::Error),
@@ -29,6 +136,7 @@ impl Channel {
         hyper_client: &hyper::Client<hyper::client::HttpConnector>,
     ) -> Result<Self, ChannelConnectError> {
         let (body_sender, req_body) = hyper::Body::channel();
+        let body_sender = Arc::new(tokio::sync::Mutex::new(body_sender));
         let req = hyper::Request::builder()
           .method(hyper::Method::POST)
           .uri("http://127.0.0.1:3000/")
@@ -41,23 +149,55 @@ impl Channel {
             Err(e) => return Err(ChannelConnectError::InitError(e)),
         };
         let mut res_body = response.into_body();
+        let tube_managers = Arc::new(Mutex::new(HashMap::new()));
+
+        let body_sender2 = body_sender.clone();
+        let tube_mgrs2 = tube_managers.clone();
         tokio::spawn(async move {
+            let tube_mgrs = tube_mgrs2;
+            let body_sender = body_sender2;
+            let mut frame_decoder = frame::Decoder::new();
+
             while let Some(data_result) = res_body.data().await {
                 println!("Server data received!");
-                match data_result {
-                    Ok(data) => println!("  server_data: `{:?}`", data),
+                let raw_data = match data_result {
+                    Ok(data) => data,
                     Err(e) => {
-                        println!("  response body has errored: `{:?}`", e);
+                        println!("  stream of data from server has errored: `{:?}`", e);
                         break;
                     }
+                };
+
+                println!("  decoding {:?} bytes of raw_data from server...", raw_data.len());
+                let new_frames = match frame_decoder.decode(raw_data.to_vec()) {
+                    Ok(frames) => frames,
+                    Err(e) => {
+                        // TODO: What happens if we get weird data from the server? Should we 
+                        //       log and dump it? Trash the request (sec implications of that?)?
+                        // 
+                        //       For now just log and ignore to avoid some kind of hand-wavy 
+                        //       DDOS situation
+                        eprintln!("frame decode error: {:?}", e);
+                        return;
+                    },
+                };
+
+                println!("  decoded {:?} new frames. Handling in order...", new_frames.len());
+                for frame in &new_frames {
+                    println!("    Frame: {:?}", frame);
+                    handle_frame(
+                        &body_sender,
+                        &tube_mgrs,
+                        frame,
+                    ).await;
                 }
             }
         });
 
         Ok(Channel {
-            body_sender: Arc::new(tokio::sync::Mutex::new(body_sender)),
+            body_sender: body_sender,
             tube_id_counter: 0,
-            tube_managers: Arc::new(Mutex::new(HashMap::new())),
+            tube_managers,
         })
     }
 

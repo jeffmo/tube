@@ -1,10 +1,7 @@
 use futures;
-use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
-
-use hyper;
 
 use crate::common::frame;
 use super::sendack_future::SendAckFuture;
@@ -32,7 +29,6 @@ enum TubeOwner {
 pub struct Tube {
     available_ackids: VecDeque<u16>,
     ack_id_counter: u16,
-    sendacks: HashMap<u16, Arc<Mutex<SendAckFutureContext>>>,
     sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>,
     tube_id: u16,
     tube_manager: Arc<Mutex<TubeManager>>,
@@ -48,7 +44,6 @@ impl Tube {
         Tube {
             ack_id_counter: 0,
             available_ackids: VecDeque::new(),
-            sendacks: HashMap::new(),
             sender,
             tube_id,
             tube_manager,
@@ -99,9 +94,13 @@ impl Tube {
             Ok(frame_data) => {
                 let sendack_ctx = Arc::new(Mutex::new(SendAckFutureContext {
                     ack_received: false,
+                    waker: None,
                 }));
-                if let Err(_) = self.sendacks.try_insert(ack_id, sendack_ctx.clone()) {
-                    return Err(SendError::AckIdAlreadyInUseInternalError)
+                {
+                    let mut tube_mgr = self.tube_manager.lock().unwrap();
+                    if let Err(_) = tube_mgr.sendacks.try_insert(ack_id, sendack_ctx.clone()) {
+                        return Err(SendError::AckIdAlreadyInUseInternalError)
+                    }
                 }
 
                 {
@@ -109,16 +108,22 @@ impl Tube {
                     match sender.send_data(frame_data.into()).await {
                         Ok(_) => (),
                         Err(e) => {
-                            self.sendacks.remove(&ack_id);
+                            {
+                                let mut tube_mgr = self.tube_manager.lock().unwrap();
+                                tube_mgr.sendacks.remove(&ack_id);
+                            }
                             return Err(SendError::TransportError(e))
                         },
                     }
                 };
 
-                SendAckFuture {
-                    ctx: sendack_ctx.clone(),
-                }.await;
-                self.sendacks.remove(&ack_id);
+                // TODO: Await this, but with some kind of a timeout...
+                SendAckFuture::new(sendack_ctx).await;
+
+                {
+                    let mut tube_mgr = self.tube_manager.lock().unwrap();
+                    tube_mgr.sendacks.remove(&ack_id);
+                }
 
                 Ok(())
             },

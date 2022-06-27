@@ -10,6 +10,8 @@ use crate::common::tube;
 use super::server_context::ServerContext;
 use super::server_event::ServerEvent;
 
+// TODO: Hmmm...this is super similar to the handle_frame() func in client/channel.rs...
+//       Can/should they be consolidated? Let's see as things develop...
 async fn handle_frame(
     sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,
     server_ctx: &Arc<Mutex<ServerContext>>,
@@ -98,7 +100,32 @@ async fn handle_frame(
             tube_id,
             ack_id,
         } => {
-            // TODO
+            let tube_mgr_mutex = match tube_store.get(tube_id) {
+                Some(tube_mgr_mutex) => tube_mgr_mutex,
+                None => {
+                    eprintln!("Received a PayloadAck frame from the client for tube_id={:?}, which is not a Tube the server is tracking!", tube_id);
+                    return;
+                }
+            };
+
+            let sendack_ctx_mutex = {
+                let tube_mgr = tube_mgr_mutex.lock().unwrap();
+                match tube_mgr.sendacks.get(ack_id) {
+                    Some(ctx) => ctx.clone(),
+                    None => {
+                        eprintln!("Received a PayloadAck(id={:?}) for Tube(id={:?}), but this is not an ack_id this tube is tracking!", ack_id, tube_id);
+                        return;
+                    }
+                }
+            };
+
+            {
+                let mut sendack_ctx = sendack_ctx_mutex.lock().unwrap();
+                sendack_ctx.ack_received = true;
+                if let Some(waker) = sendack_ctx.waker.take() {
+                  waker.wake();
+                }
+            }
         },
         frame::Frame::ServerHasFinishedSending {
             tube_id,
@@ -132,13 +159,6 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
 
     fn call(&mut self, req: hyper::Request<hyper::Body>) -> Self::Future {
         let (body_sender, body) = hyper::Body::channel();
-        // TODO: !!!!! 
-        //       Use a tokio::sync::Mutex so that locks held while awaiting a data 
-        //       send are safer/less prone to deadlocks as the send itself is .awaited
-        //
-        //       See:
-        //       https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html
-        //
         let body_sender = Arc::new(tokio::sync::Mutex::new(body_sender));
         let res = hyper::Response::new(body);
 

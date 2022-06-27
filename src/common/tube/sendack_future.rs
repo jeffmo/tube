@@ -1,23 +1,34 @@
 use std::future;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::task;
 
 #[derive(Debug)]
-pub struct SendAckFutureContext {
+pub(in crate) struct SendAckFutureContext {
     pub ack_received: bool,
+    pub waker: Option<task::Waker>,
 }
 
-pub struct SendAckFuture {
-    pub ctx: Arc<Mutex<SendAckFutureContext>>,
+pub(in crate) struct SendAckFuture {
+    ctx: Arc<Mutex<SendAckFutureContext>>,
+}
+impl SendAckFuture {
+    pub fn new(ctx: Arc<Mutex<SendAckFutureContext>>) -> Self {
+        SendAckFuture {
+            ctx,
+        }
+    }
 }
 impl future::Future for SendAckFuture {
     type Output = ();
 
     fn poll(
         self: std::pin::Pin<&mut Self>, 
-        _cx: &mut std::task::Context<'_>,
+        cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        let ctx = self.ctx.lock().unwrap();
+        let mut ctx = self.ctx.lock().unwrap();
+        ctx.waker = Some(cx.waker().clone());
+
         if ctx.ack_received {
             std::task::Poll::Ready(())
         } else {

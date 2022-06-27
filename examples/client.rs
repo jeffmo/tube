@@ -17,30 +17,24 @@ async fn main() {
     println!("Channel created! Creating tube...");
 
     let tube1_headers = HashMap::new();
-    let tube1 = match channel.make_tube(tube1_headers).await {
+    let mut tube1 = match channel.make_tube(tube1_headers).await {
         Ok(tube) => tube,
         Err(e) => {
             println!("Error creating tube: {:?}", e);
             return
         },
     };
+    println!("tube1 created! Sending some data...");
+    tube1.send("tube1 data!".into()).await;
+    println!("received ack for data sent on tube1! Creating tube2...");
 
-    let tube2_headers = HashMap::new();
-    let tube2 = match channel.make_tube(tube2_headers).await {
-        Ok(tube) => tube,
-        Err(e) => {
-            println!("Error creating tube: {:?}", e);
-            return
-        },
-    };
-
-    println!("Waiting a bit before 3rd tube...");
+    println!("Waiting a bit before 2nd tube...");
     // TODO: Deleting this kills the transport... Probably need to gracefully 
     //       kill/end/await all the Channels in a destructor or something?
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    let tube3_headers = HashMap::new();
-    let tube3 = match channel.make_tube(tube3_headers).await {
+    let tube2_headers = HashMap::new();
+    let tube2 = match channel.make_tube(tube2_headers).await {
         Ok(tube) => tube,
         Err(e) => {
             println!("Error creating tube: {:?}", e);
