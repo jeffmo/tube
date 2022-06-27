@@ -32,7 +32,7 @@ async fn handle_frame(
             ack_id,
             data,
         } => {
-            let mut tube_mgr = {
+            let tube_mgr = {
                 let tube_mgrs = tube_managers.lock().unwrap();
                 match tube_mgrs.get(tube_id) {
                     Some(tube_ctx) => tube_ctx.clone(),
@@ -76,7 +76,7 @@ async fn handle_frame(
             tube_id,
             ack_id,
         } => {
-            let mut tube_mgr = {
+            let tube_mgr = {
               let tube_mgrs = tube_managers.lock().unwrap();
               match tube_mgrs.get(tube_id) {
                     Some(tube_mgr) => tube_mgr.clone(),
@@ -134,6 +134,7 @@ pub struct Channel {
 impl Channel {
     pub(in crate::client) async fn new(
         hyper_client: &hyper::Client<hyper::client::HttpConnector>,
+        _headers: HashMap<String, String>, // TODO
     ) -> Result<Self, ChannelConnectError> {
         let (body_sender, req_body) = hyper::Body::channel();
         let body_sender = Arc::new(tokio::sync::Mutex::new(body_sender));
@@ -228,7 +229,7 @@ impl Channel {
         let mut tube_managers = self.tube_managers.lock().unwrap();
         match tube_managers.try_insert(tube_id, tube_mgr) {
           Ok(_) => Ok(tube),
-          Err(e) => Err(MakeTubeError::InternalErrorDuplicateTubeId(tube_id)),
+          Err(_) => Err(MakeTubeError::InternalErrorDuplicateTubeId(tube_id)),
         }
     }
 

@@ -5,12 +5,7 @@ use std::sync::Mutex;
 use super::channel::Channel;
 use super::channel::ChannelConnectError;
 
-pub enum MakeChannelError {
-  ChannelConnectError(ChannelConnectError)
-}
-
 pub struct Client {
-  channels: Vec<Arc<Mutex<Channel>>>,
   hyper_client: hyper::Client<hyper::client::HttpConnector>,
 }
 impl Client {
@@ -21,7 +16,6 @@ impl Client {
         .build_http();
 
     Client {
-      channels: vec![],
       hyper_client,
     }
   }
@@ -30,6 +24,6 @@ impl Client {
     &mut self,
     headers: HashMap<String, String>,
   ) -> Result<Channel, ChannelConnectError> {
-    Channel::new(&self.hyper_client).await
+    Channel::new(&self.hyper_client, headers).await
   }
 }

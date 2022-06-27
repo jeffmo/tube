@@ -1,4 +1,3 @@
-use futures::StreamExt;
 use std::collections::HashMap;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
@@ -25,7 +24,7 @@ async fn main() {
         },
     };
     println!("tube1 created! Sending some data...");
-    tube1.send("tube1 data!".into()).await;
+    tube1.send("tube1 data!".into()).await.unwrap();
     println!("received ack for data sent on tube1! Creating tube2...");
 
     println!("Waiting a bit before 2nd tube...");
@@ -34,7 +33,7 @@ async fn main() {
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     let tube2_headers = HashMap::new();
-    let tube2 = match channel.make_tube(tube2_headers).await {
+    let _tube2 = match channel.make_tube(tube2_headers).await {
         Ok(tube) => tube,
         Err(e) => {
             println!("Error creating tube: {:?}", e);
