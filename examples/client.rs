@@ -51,7 +51,11 @@ async fn main() {
     while let Some(tube_event) = tube1.next().await {
       println!("Tubeevent: {:?}", tube_event);
     }
-    println!("No more tube events!");
+    std::mem::drop(tube1);
+    println!("No more tube events! Dropping channel in 3 seconds...");
+    tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
+    std::mem::drop(channel);
+    println!("Channel now dropped!");
 
     println!("Waiting a bit before exiting...");
     // TODO: Deleting this kills the transport... Probably need to gracefully 

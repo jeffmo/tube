@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use futures::StreamExt;
 use hyper::body::HttpBody;
 
 use crate::common::frame;
@@ -191,14 +192,29 @@ impl Channel {
         let mut res_body = response.into_body();
         let tube_managers = Arc::new(Mutex::new(HashMap::new()));
 
-        let body_sender2 = body_sender.clone();
+        let body_sender_weak = Arc::downgrade(&body_sender);
         let tube_mgrs2 = tube_managers.clone();
         tokio::spawn(async move {
             let tube_mgrs = tube_mgrs2;
-            let body_sender = body_sender2;
             let mut frame_decoder = frame::Decoder::new();
 
             while let Some(data_result) = res_body.data().await {
+                // This seems hacky...but it works.
+                //
+                // When the sender is dropped, res_body.data().await yields 
+                // Some(Buf{}) -- aka an empty Buf. Weird...but I guess it 
+                // works?
+                //
+                // A better solution might be to wrap res_body.data() inside some
+                // stream that ends when EITHER .data() returns None OR 
+                // body_sender is dropped. That way the async loop 
+                // /intentionally/ polls and stops iterating when all tubes + 
+                // channels have been dropped.
+                let body_sender = match body_sender_weak.upgrade() {
+                    Some(body_sender) => body_sender,
+                    None => break,
+                };
+
                 println!("Server data received!");
                 let raw_data = match data_result {
                     Ok(data) => data,
