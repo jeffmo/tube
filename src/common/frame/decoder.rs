@@ -7,7 +7,6 @@ use super::frame;
 
 // Returned by Decoder::decode() and provides context around 
 // a FrameParseError
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct FrameDecodeError {
     // TODO: Remove these allow(dead_code) tags if they aren't needed anymore
@@ -131,10 +130,13 @@ impl Decoder {
         }
     }
 
-    pub fn decode(&mut self, data: Vec<u8>) -> Result<Vec<frame::Frame>, FrameDecodeError> {
+    pub fn decode(
+        &mut self, 
+        data: Vec<u8>,
+    ) -> Result<VecDeque<frame::Frame>, FrameDecodeError> {
         self.partial_data.append(&mut VecDeque::from(data));
 
-        let mut decoded_frames = vec![];
+        let mut decoded_frames = VecDeque::new();
         while self.partial_data.len() >= 3 {
             let body_len = double_u8_to_u16(
                 self.partial_data[1], 
@@ -168,7 +170,7 @@ impl Decoder {
                 frame_data.pop_front(); // FrameBodyByteLength[0]
                 frame_data.pop_front(); // FrameBodyByteLength[1]
                 match parse_frame_body(frame_type, frame_data) {
-                    Ok(frame) => decoded_frames.push(frame),
+                    Ok(frame) => decoded_frames.push_back(frame),
                     Err(decode_error) => return Err(FrameDecodeError {
                         parse_error: decode_error,
                         num_frames_parsed_successfully: decoded_frames.len(),

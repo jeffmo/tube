@@ -23,7 +23,7 @@ pub(in super) const SERVER_HAS_FINISHED_SENDING_FRAMETYPE: u8 = 0x5;
  * account for the 3 bytes used in the frame's header structure.
  */
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone,Debug,PartialEq)]
 pub enum Frame {
     /**
      * This frame is sent by the client when it will send no further Payload 

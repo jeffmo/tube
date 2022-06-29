@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::common::frame;
+use crate::common::PeerType;
 use super::sendack_future::SendAckFuture;
 use super::sendack_future::SendAckFutureContext;
 use super::tube_event;
@@ -28,19 +29,13 @@ pub enum HasFinishedSendingError {
 }
 
 #[derive(Debug)]
-enum TubeOwner {
-    Client,
-    Server,
-}
-
-#[derive(Debug)]
 pub struct Tube {
     available_ackids: VecDeque<u16>,
     ack_id_counter: u16,
     sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>,
     tube_id: u16,
     tube_manager: Arc<Mutex<TubeManager>>,
-    tube_owner: TubeOwner,
+    tube_owner: PeerType,
 }
 impl Tube {
     pub fn get_id(&self) -> u16 {
@@ -49,9 +44,9 @@ impl Tube {
 
     pub async fn has_finished_sending(&self) -> Result<(), HasFinishedSendingError> {
         let maybe_frame_data = match self.tube_owner {
-            TubeOwner::Client => 
+            PeerType::Client => 
                 frame::encode_client_has_finished_sending_frame(self.tube_id),
-            TubeOwner::Server => 
+            PeerType::Server => 
                 frame::encode_server_has_finished_sending_frame(self.tube_id),
         };
         let frame_data = match maybe_frame_data {
@@ -61,7 +56,7 @@ impl Tube {
         {
             let mut tube_mgr = self.tube_manager.lock().unwrap();
             use TubeCompletionState::*;
-            use TubeOwner::*;
+            use PeerType::*;
             match (&tube_mgr.completion_state, &self.tube_owner) {
                 (&Open, &Client) => 
                     tube_mgr.completion_state = ClientHasFinishedSending,
@@ -86,8 +81,8 @@ impl Tube {
         }
     }
 
-    fn new(
-        tube_owner: TubeOwner,
+    pub(in crate) fn new(
+        tube_owner: PeerType,
         tube_id: u16,
         sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>, 
         tube_manager: Arc<Mutex<TubeManager>>,
@@ -100,24 +95,6 @@ impl Tube {
             tube_manager,
             tube_owner,
         }
-    }
-
-    #[cfg(feature = "client")]
-    pub(in crate) fn new_on_client(
-        tube_id: u16,
-        sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>, 
-        tube_manager: Arc<Mutex<TubeManager>>,
-    ) -> Self {
-        Self::new(TubeOwner::Client, tube_id, sender, tube_manager)
-    }
-
-    #[cfg(feature = "server")]
-    pub(in crate) fn new_on_server(
-        tube_id: u16,
-        sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>, 
-        tube_manager: Arc<Mutex<TubeManager>>,
-    ) -> Self {
-        Self::new(TubeOwner::Server, tube_id, sender, tube_manager)
     }
 
     pub async fn send(&mut self, data: Vec<u8>) -> Result<(), SendError> {

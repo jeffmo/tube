@@ -6,173 +6,9 @@ use std::sync::Mutex;
 use hyper::body::HttpBody;
 
 use crate::common::frame;
-use crate::common::tube;
+use crate::common::PeerType;
 use super::server_context::ServerContext;
 use super::server_event::ServerEvent;
-
-// TODO: Hmmm...this is super similar to the handle_frame() func in client/channel.rs...
-//       Can/should they be consolidated? Let's see as things develop...
-async fn handle_frame(
-    sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,
-    server_ctx: &Arc<Mutex<ServerContext>>,
-    tube_store: &mut HashMap<u16, Arc<Mutex<tube::TubeManager>>>, 
-    frame: &frame::Frame,
-) {
-    match frame {
-        frame::Frame::ClientHasFinishedSending {
-            tube_id,
-        } => {
-            let tube_mgr = match tube_store.get(tube_id) {
-                Some(tube_ctx) => tube_ctx,
-                None => {
-                    // TODO: Hmm...send back some kind of an error to the client?
-                    eprintln!(
-                        "Received a Payload frame for Tube({:?}) that we aren't aware of!", 
-                        tube_id
-                    );
-                    return;
-                },
-            };
-
-            let mut tube_mgr = tube_mgr.lock().unwrap();
-            let new_state = {
-                use tube::TubeCompletionState::*;
-                match tube_mgr.completion_state {
-                    Open => ClientHasFinishedSending,
-                    ServerHasFinishedSending => Closed,
-                    ClientHasFinishedSending => {
-                        eprintln!("Client sent ClientHasFinishedSending frame twice!");
-                        ClientHasFinishedSending
-                    },
-                    Closed => {
-                        eprintln!("Client sent ClientHasFinishedSending frame twice!");
-                        Closed
-                    },
-                }
-            };
-            if tube_mgr.completion_state != new_state {
-                tube_mgr.completion_state = new_state;
-                if tube_mgr.completion_state == tube::TubeCompletionState::ClientHasFinishedSending {
-                    tube_mgr.pending_events.push_back(tube::TubeEvent::ClientHasFinishedSending);
-                }
-                if let Some(waker) = tube_mgr.waker.take() {
-                  waker.wake();
-                }
-            }
-        },
-        frame::Frame::Drain => {
-            // TODO
-        },
-        frame::Frame::EstablishTube { 
-            tube_id, 
-            headers,
-        } => {
-            let mut tube_mgr = tube::TubeManager::new();
-
-            // TODO: Actually Authenticate... 
-            //       Probably want to do this in TubeManager::new()? Maybe? Not sure...
-            tube_mgr.state_machine.transition_to(&tube::TubeEvent::AuthenticatedAndReady);
-
-            let tube_mgr = Arc::new(Mutex::new(tube_mgr));
-
-            println!("      Storing TubeManager...");
-            if let Err(e) = tube_store.try_insert(*tube_id, tube_mgr.clone()) {
-                // TODO: Hmmm...should we respond to the client in some way with an error?
-                eprintln!("Error storing TubeManager for new tube: {:?}", e);
-                return;
-            }
-
-            println!("      Emitting tube...");
-            let tube = tube::Tube::new_on_server(
-                *tube_id,
-                sender.clone(),
-                tube_mgr,
-            );
-            let mut server_ctx = server_ctx.lock().unwrap();
-            server_ctx.pending_events.push_back(ServerEvent::NewTube(tube));
-            if let Some(waker) = server_ctx.waker.take() {
-                waker.wake();
-            }
-        },
-        frame::Frame::Payload {
-            tube_id,
-            ack_id,
-            data,
-        } => {
-            let tube_mgr = match tube_store.get(tube_id) {
-                Some(tube_ctx) => tube_ctx,
-                None => {
-                    // TODO: Hmm...send back some kind of an error to the client?
-                    eprintln!(
-                        "Received a Payload frame for Tube({:?}) that we aren't aware of!", 
-                        tube_id
-                    );
-                    return;
-                },
-            };
-
-            // If an ack was requested, send one...
-            if let Some(ack_id) = ack_id {
-                let frame_data = match frame::encode_payload_ack_frame(*tube_id, *ack_id) {
-                    Ok(data) => data,
-                    Err(e) => {
-                        eprintln!("Error encoding Ack frame: {:?}", e);
-                        return;
-                    },
-                };
-                let mut sender = sender.lock().await;
-                match sender.send_data(frame_data.into()).await {
-                    Ok(_) => (),
-                    Err(e) => {
-                        eprintln!("Error sending ack frame to client: {:?}", e);
-                        return
-                    },
-                }
-            }
-
-            let mut tube_mgr = tube_mgr.lock().unwrap();
-            tube_mgr.pending_events.push_back(tube::TubeEvent::Payload(data.to_vec()));
-            if let Some(waker) = tube_mgr.waker.take() {
-                waker.wake();
-            }
-        },
-        frame::Frame::PayloadAck {
-            tube_id,
-            ack_id,
-        } => {
-            let tube_mgr_mutex = match tube_store.get(tube_id) {
-                Some(tube_mgr_mutex) => tube_mgr_mutex,
-                None => {
-                    eprintln!("Received a PayloadAck frame from the client for tube_id={:?}, which is not a Tube the server is tracking!", tube_id);
-                    return;
-                }
-            };
-
-            let sendack_ctx_mutex = {
-                let tube_mgr = tube_mgr_mutex.lock().unwrap();
-                match tube_mgr.sendacks.get(ack_id) {
-                    Some(ctx) => ctx.clone(),
-                    None => {
-                        eprintln!("Received a PayloadAck(id={:?}) for Tube(id={:?}), but this is not an ack_id this tube is tracking!", ack_id, tube_id);
-                        return;
-                    }
-                }
-            };
-
-            {
-                let mut sendack_ctx = sendack_ctx_mutex.lock().unwrap();
-                sendack_ctx.ack_received = true;
-                if let Some(waker) = sendack_ctx.waker.take() {
-                  waker.wake();
-                }
-            }
-        },
-        frame::Frame::ServerHasFinishedSending { .. } => {
-            eprintln!("Received a ServerHasFinishedSending frame from the client...uhhh...");
-            return;
-        },
-    }
-}
 
 pub(in crate::server) struct TubezHttpReq {
     server_ctx: Arc<Mutex<ServerContext>>,
@@ -206,10 +42,14 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
         let server_ctx = self.server_ctx.clone();
         let mut body = req.into_body();
         tokio::spawn(async move {
-            let body_sender = body_sender.clone();
+            let mut body_sender = body_sender.clone();
             let server_ctx = server_ctx.clone();
             let mut frame_decoder = frame::Decoder::new();
-            let mut tube_store = HashMap::new();
+            let mut tube_store = Arc::new(Mutex::new(HashMap::new()));
+            let mut frame_handler = frame::FrameHandler::new(
+                PeerType::Server,
+                &mut tube_store,
+            );
 
             while let Some(data_result) = body.data().await {
                 let raw_data = match data_result {
@@ -221,7 +61,7 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
                 };
 
                 println!("  decoding {:?} bytes of raw_data from client...", raw_data.len());
-                let new_frames = match frame_decoder.decode(raw_data.to_vec()) {
+                let mut new_frames = match frame_decoder.decode(raw_data.to_vec()) {
                     Ok(frames) => frames,
                     Err(e) => {
                         // TODO: What happens if we get weird data from the client? Should we 
@@ -235,14 +75,21 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
                 };
 
                 println!("  decoded {:?} new frames. Handling in order...", new_frames.len());
-                for frame in &new_frames {
+                while let Some(frame) = new_frames.pop_front() {
                     println!("    Frame: {:?}", frame);
-                    handle_frame(
-                        &body_sender, 
-                        &server_ctx, 
-                        &mut tube_store, 
-                        frame
-                    ).await;
+                    match frame_handler.handle_frame(frame, &mut body_sender).await {
+                        Ok(frame::FrameHandlerResult::NewTube(tube)) => {
+                            let mut server_ctx = server_ctx.lock().unwrap();
+                            server_ctx.pending_events.push_back(
+                                ServerEvent::NewTube(tube)
+                            );
+                            if let Some(waker) = server_ctx.waker.take() {
+                                waker.wake();
+                            }
+                        },
+                        Ok(frame::FrameHandlerResult::FullyHandled) => (),
+                        Err(e) => eprintln!("      Error handling frame: {:?}", e),
+                    }
                 }
             }
             println!("Stream of httprequest data from client has ended!");

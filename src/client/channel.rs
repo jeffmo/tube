@@ -2,157 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use futures::StreamExt;
 use hyper::body::HttpBody;
 
+use crate::common::PeerType;
 use crate::common::frame;
 use crate::common::tube;
-
-async fn handle_frame(
-    sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,
-    tube_managers: &Arc<Mutex<HashMap<u16, Arc<Mutex<tube::TubeManager>>>>>, 
-    frame: &frame::Frame,
-) {
-    match frame {
-        frame::Frame::ClientHasFinishedSending {
-            tube_id,
-        } => {
-            eprintln!("Received a ClientHasFinishedSending frame from the server...uhhh...");
-            return;
-        },
-        frame::Frame::Drain => {
-            // TODO
-        },
-        frame::Frame::EstablishTube { 
-            tube_id, 
-            headers,
-        } => {
-            // TODO
-        },
-        frame::Frame::Payload {
-            tube_id,
-            ack_id,
-            data,
-        } => {
-            let tube_mgr = {
-                let tube_mgrs = tube_managers.lock().unwrap();
-                match tube_mgrs.get(tube_id) {
-                    Some(tube_ctx) => tube_ctx.clone(),
-                    None => {
-                        // TODO: Hmm...send back some kind of an error to the client?
-                        eprintln!(
-                            "Received a Payload frame for Tube({:?}) that we aren't aware of!", 
-                            tube_id
-                        );
-                        return;
-                    },
-                }
-            };
-
-            // If an ack was requested, send one...
-            if let Some(ack_id) = ack_id {
-                let frame_data = match frame::encode_payload_ack_frame(*tube_id, *ack_id) {
-                    Ok(data) => data,
-                    Err(e) => {
-                        eprintln!("Error encoding Ack frame: {:?}", e);
-                        return;
-                    },
-                };
-                let mut sender = sender.lock().await;
-                match sender.send_data(frame_data.into()).await {
-                    Ok(_) => (),
-                    Err(e) => {
-                        eprintln!("Error sending ack frame to client: {:?}", e);
-                        return
-                    },
-                }
-            }
-
-            let mut tube_mgr = tube_mgr.lock().unwrap();
-            tube_mgr.pending_events.push_back(tube::TubeEvent::Payload(data.to_vec()));
-            if let Some(waker) = tube_mgr.waker.take() {
-                waker.wake();
-            }
-        },
-        frame::Frame::PayloadAck {
-            tube_id,
-            ack_id,
-        } => {
-            let tube_mgr = {
-              let tube_mgrs = tube_managers.lock().unwrap();
-              match tube_mgrs.get(tube_id) {
-                    Some(tube_mgr) => tube_mgr.clone(),
-                    None => {
-                        eprintln!("Received a PayloadAck frame from the client for tube_id={:?}, which is not a Tube the server is tracking!", tube_id);
-                        return;
-                    }
-              }
-            };
-
-            let sendack_ctx = {
-                let tube_mgr = tube_mgr.lock().unwrap();
-                match tube_mgr.sendacks.get(ack_id) {
-                    Some(ctx) => ctx.clone(),
-                    None => {
-                        eprintln!("Received a PayloadAck(id={:?}) for Tube(id={:?}), but this is not an ack_id this tube is tracking!", ack_id, tube_id);
-                        return;
-                    }
-                }
-            };
-
-            {
-                let mut sendack_ctx = sendack_ctx.lock().unwrap();
-                sendack_ctx.ack_received = true;
-                if let Some(waker) = sendack_ctx.waker.take() {
-                  waker.wake();
-                }
-            }
-        },
-        frame::Frame::ServerHasFinishedSending {
-            tube_id,
-        } => {
-            let tube_mgr = {
-                let tube_mgrs = tube_managers.lock().unwrap();
-                match tube_mgrs.get(tube_id) {
-                    Some(tube_ctx) => tube_ctx.clone(),
-                    None => {
-                        // TODO: Hmm...send back some kind of an error to the client?
-                        eprintln!(
-                            "Received a ServerHasFinishedSending frame for Tube({:?}) that we aren't aware of!", 
-                            tube_id
-                        );
-                        return;
-                    },
-                }
-            };
-            let mut tube_mgr = tube_mgr.lock().unwrap();
-            let new_state = {
-                use tube::TubeCompletionState::*;
-                match tube_mgr.completion_state {
-                    Open => ServerHasFinishedSending,
-                    ClientHasFinishedSending => Closed,
-                    ServerHasFinishedSending => {
-                        eprintln!("Server sent ServerHasFinishedSending frame twice!");
-                        ServerHasFinishedSending
-                    },
-                    Closed => {
-                        eprintln!("Server sent ServerHasFinishedSending frame twice!");
-                        Closed
-                    },
-                }
-            };
-            if tube_mgr.completion_state != new_state {
-                tube_mgr.completion_state = new_state;
-                if tube_mgr.completion_state == tube::TubeCompletionState::ServerHasFinishedSending {
-                    tube_mgr.pending_events.push_back(tube::TubeEvent::ServerHasFinishedSending);
-                }
-                if let Some(waker) = tube_mgr.waker.take() {
-                  waker.wake();
-                }
-            }
-        },
-    }
-}
 
 #[derive(Debug)]
 pub enum ChannelConnectError {
@@ -195,8 +49,12 @@ impl Channel {
         let body_sender_weak = Arc::downgrade(&body_sender);
         let tube_mgrs2 = tube_managers.clone();
         tokio::spawn(async move {
-            let tube_mgrs = tube_mgrs2;
+            let mut tube_mgrs = tube_mgrs2;
             let mut frame_decoder = frame::Decoder::new();
+            let mut frame_handler = frame::FrameHandler::new(
+                PeerType::Client,
+                &mut tube_mgrs,
+            );
 
             while let Some(data_result) = res_body.data().await {
                 // This seems hacky...but it works.
@@ -210,7 +68,7 @@ impl Channel {
                 // body_sender is dropped. That way the async loop 
                 // /intentionally/ polls and stops iterating when all tubes + 
                 // channels have been dropped.
-                let body_sender = match body_sender_weak.upgrade() {
+                let mut body_sender = match body_sender_weak.upgrade() {
                     Some(body_sender) => body_sender,
                     None => break,
                 };
@@ -225,7 +83,7 @@ impl Channel {
                 };
 
                 println!("  decoding {:?} bytes of raw_data from server...", raw_data.len());
-                let new_frames = match frame_decoder.decode(raw_data.to_vec()) {
+                let mut new_frames = match frame_decoder.decode(raw_data.to_vec()) {
                     Ok(frames) => frames,
                     Err(e) => {
                         // TODO: What happens if we get weird data from the server? Should we 
@@ -239,13 +97,15 @@ impl Channel {
                 };
 
                 println!("  decoded {:?} new frames. Handling in order...", new_frames.len());
-                for frame in &new_frames {
+                while let Some(frame) = new_frames.pop_front() {
                     println!("    Frame: {:?}", frame);
-                    handle_frame(
-                        &body_sender,
-                        &tube_mgrs,
-                        frame,
-                    ).await;
+                    match frame_handler.handle_frame(frame, &mut body_sender).await {
+                        Ok(frame::FrameHandlerResult::NewTube(tube)) => {
+                            // TODO: Server-initiated tubes aren't supported yet.
+                        },
+                        Ok(frame::FrameHandlerResult::FullyHandled) => (),
+                        Err(e) => eprintln!("      Error handling frame: {:?}", e),
+                    }
                 }
             }
         });
@@ -280,11 +140,16 @@ impl Channel {
         //       before creating a Tube and returning it.
 
         let tube_mgr = Arc::new(Mutex::new(tube::TubeManager::new()));
-        let tube = tube::Tube::new_on_client(tube_id, self.body_sender.clone(), tube_mgr.clone());
+        let tube = tube::Tube::new(
+            PeerType::Client, 
+            tube_id, 
+            self.body_sender.clone(), 
+            tube_mgr.clone(),
+        );
         let mut tube_managers = self.tube_managers.lock().unwrap();
         match tube_managers.try_insert(tube_id, tube_mgr) {
-          Ok(_) => Ok(tube),
-          Err(_) => Err(MakeTubeError::InternalErrorDuplicateTubeId(tube_id)),
+            Ok(_) => Ok(tube),
+            Err(_) => Err(MakeTubeError::InternalErrorDuplicateTubeId(tube_id)),
         }
     }
 
