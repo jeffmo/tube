@@ -28,6 +28,50 @@ pub enum HasFinishedSendingError {
     TransportError(hyper::Error),
 }
 
+async fn send_has_finished_sending(
+    peer_type: PeerType,
+    tube_id: u16,
+    tube_manager: &Arc<Mutex<TubeManager>>,
+    sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,
+) -> Result<(), HasFinishedSendingError> {
+    let maybe_frame_data = match peer_type {
+        PeerType::Client => 
+            frame::encode_client_has_finished_sending_frame(tube_id),
+        PeerType::Server => 
+            frame::encode_server_has_finished_sending_frame(tube_id),
+    };
+    let frame_data = match maybe_frame_data {
+        Ok(data) => data,
+        Err(e) => return Err(HasFinishedSendingError::FrameEncodeError(e)),
+    };
+    {
+        let mut tube_mgr = tube_manager.lock().unwrap();
+        use TubeCompletionState::*;
+        use PeerType::*;
+        match (&tube_mgr.completion_state, &peer_type) {
+            (&Open, &Client) => 
+                tube_mgr.completion_state = ClientHasFinishedSending,
+            (&Open, &Server) => 
+                tube_mgr.completion_state = ServerHasFinishedSending,
+            (&ClientHasFinishedSending, &Server) | (&ServerHasFinishedSending, &Client) => {
+                tube_mgr.completion_state = Closed;
+                if let Some(waker) = tube_mgr.waker.take() {
+                    waker.wake();
+                }
+            },
+            (&ClientHasFinishedSending, &Client) | 
+                (&ServerHasFinishedSending, &Server) |
+                (&Closed, _) => 
+                return Err(HasFinishedSendingError::AlreadyMarkedAsFinishedSending),
+        };
+    };
+    let mut sender = sender.lock().await;
+    match sender.send_data(frame_data.into()).await {
+        Ok(_) => Ok(()),
+        Err(e) => return Err(HasFinishedSendingError::TransportError(e)),
+    }
+}
+
 #[derive(Debug)]
 pub struct Tube {
     available_ackids: VecDeque<u16>,
@@ -35,7 +79,7 @@ pub struct Tube {
     sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>,
     tube_id: u16,
     tube_manager: Arc<Mutex<TubeManager>>,
-    tube_owner: PeerType,
+    peer_type: PeerType,
 }
 impl Tube {
     pub fn get_id(&self) -> u16 {
@@ -43,46 +87,16 @@ impl Tube {
     }
 
     pub async fn has_finished_sending(&self) -> Result<(), HasFinishedSendingError> {
-        let maybe_frame_data = match self.tube_owner {
-            PeerType::Client => 
-                frame::encode_client_has_finished_sending_frame(self.tube_id),
-            PeerType::Server => 
-                frame::encode_server_has_finished_sending_frame(self.tube_id),
-        };
-        let frame_data = match maybe_frame_data {
-            Ok(data) => data,
-            Err(e) => return Err(HasFinishedSendingError::FrameEncodeError(e)),
-        };
-        {
-            let mut tube_mgr = self.tube_manager.lock().unwrap();
-            use TubeCompletionState::*;
-            use PeerType::*;
-            match (&tube_mgr.completion_state, &self.tube_owner) {
-                (&Open, &Client) => 
-                    tube_mgr.completion_state = ClientHasFinishedSending,
-                (&Open, &Server) => 
-                    tube_mgr.completion_state = ServerHasFinishedSending,
-                (&ClientHasFinishedSending, &Server) | (&ServerHasFinishedSending, &Client) => {
-                    tube_mgr.completion_state = Closed;
-                    if let Some(waker) = tube_mgr.waker.take() {
-                        waker.wake();
-                    }
-                },
-                (&ClientHasFinishedSending, &Client) | 
-                    (&ServerHasFinishedSending, &Server) |
-                    (&Closed, _) => 
-                    return Err(HasFinishedSendingError::AlreadyMarkedAsFinishedSending),
-            };
-        };
-        let mut sender = self.sender.lock().await;
-        match sender.send_data(frame_data.into()).await {
-            Ok(_) => Ok(()),
-            Err(e) => return Err(HasFinishedSendingError::TransportError(e)),
-        }
+        send_has_finished_sending(
+            self.peer_type,
+            self.tube_id,
+            &self.tube_manager,
+            &self.sender,
+        ).await
     }
 
     pub(in crate) fn new(
-        tube_owner: PeerType,
+        peer_type: PeerType,
         tube_id: u16,
         sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>, 
         tube_manager: Arc<Mutex<TubeManager>>,
@@ -93,7 +107,7 @@ impl Tube {
             sender,
             tube_id,
             tube_manager,
-            tube_owner,
+            peer_type,
         }
     }
 
@@ -201,6 +215,62 @@ impl futures::stream::Stream for Tube {
                     Closed | ServerHasFinishedSending => futures::task::Poll::Ready(None),
                 }
             }
+        }
+    }
+}
+impl Drop for Tube {
+    fn drop(&mut self) {
+        let completion_state = {
+            let tube_mgr = self.tube_manager.lock().unwrap();
+            tube_mgr.completion_state.clone()
+        };
+        let remote_peer_str = match self.peer_type {
+            PeerType::Client => "server",
+            PeerType::Server => "client"
+        };
+
+        let peer_not_finished_str = format!(
+            "Dropping tube(id={}) before {} has finished sending!",
+            self.tube_id,
+            remote_peer_str,
+        );
+
+        use PeerType::*;
+        use TubeCompletionState::*;
+        match (self.peer_type, &completion_state) {
+            (_, &Open) |
+            (Client, &ServerHasFinishedSending) |
+            (Server, &ClientHasFinishedSending) => {
+                if let Open = completion_state {
+                    eprintln!("{}", peer_not_finished_str);
+                }
+
+                let peer_type = self.peer_type;
+                let tube_id = self.tube_id;
+                let tube_manager = self.tube_manager.clone();
+                let sender = self.sender.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = send_has_finished_sending(
+                        peer_type,
+                        tube_id,
+                        &tube_manager,
+                        &sender,
+                    ).await {
+                        let remote_peer = match peer_type {
+                            PeerType::Client => "server",
+                            PeerType::Server => "client"
+                        };
+                        eprintln!("Attempted to communicate to the {:?} that Tube has finished sending when dropping the Tube object, but failed: {:?}", remote_peer_str, e)
+                    }
+                });
+            },
+
+            (Client, &ClientHasFinishedSending) |
+            (Server, &ServerHasFinishedSending) => {
+                eprintln!("{}", peer_not_finished_str);
+                // TODO: Send some kind of Abort frame?
+            },
+            (_, &Closed) => (),
         }
     }
 }

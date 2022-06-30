@@ -27,9 +27,7 @@ async fn main() {
     };
     println!("tube1 created! Sending some data...");
     tube1.send("tube1 data!".into()).await.unwrap();
-    println!("received ack for data sent on tube1! Marking tube as has_finished_sending...");
-    tube1.has_finished_sending().await.unwrap();
-    println!("Tube now marked as has_finished_sending!");
+    println!("received ack for data sent on tube1!");
 
     /*
     println!("Waiting a bit before creating 2nd tube...");

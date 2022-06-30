@@ -7,7 +7,7 @@ use std::task;
 use super::sendack_future::SendAckFutureContext;
 use super::tube_event;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone,Debug,PartialEq)]
 pub(in crate) enum TubeCompletionState {
     Open,
     ClientHasFinishedSending,
