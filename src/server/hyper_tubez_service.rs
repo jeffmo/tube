@@ -2,20 +2,29 @@ use futures_util::future;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::Weak;
 
 use hyper::body::HttpBody;
 
 use crate::common::frame;
 use crate::common::PeerType;
+use super::channel::Channel;
+use super::channel::ChannelContext;
+use super::channel::ChannelEvent;
 use super::server_context::ServerContext;
 use super::server_event::ServerEvent;
 
 pub(in crate::server) struct TubezHttpReq {
+    channel_ctx: Weak<Mutex<ChannelContext>>,
     server_ctx: Arc<Mutex<ServerContext>>,
 }
 impl TubezHttpReq {
-    fn new(server_ctx: Arc<Mutex<ServerContext>>) -> Self {
+    fn new(
+        server_ctx: Arc<Mutex<ServerContext>>,
+        channel_ctx: Weak<Mutex<ChannelContext>>,
+    ) -> Self {
         TubezHttpReq {
+            channel_ctx,
             server_ctx,
         }
     }
@@ -34,16 +43,15 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
 
     fn call(&mut self, req: hyper::Request<hyper::Body>) -> Self::Future {
         let (body_sender, body) = hyper::Body::channel();
-        let body_sender = Arc::new(tokio::sync::Mutex::new(body_sender));
+        let mut body_sender = Arc::new(tokio::sync::Mutex::new(body_sender));
         let res = hyper::Response::new(body);
 
         println!("Http request received! Headers: {:?}", req.headers());
 
+        let channel_ctx = self.channel_ctx.clone();
         let server_ctx = self.server_ctx.clone();
         let mut body = req.into_body();
         tokio::spawn(async move {
-            let mut body_sender = body_sender.clone();
-            let server_ctx = server_ctx.clone();
             let mut frame_decoder = frame::Decoder::new();
             let mut tube_store = Arc::new(Mutex::new(HashMap::new()));
             let mut frame_handler = frame::FrameHandler::new(
@@ -60,7 +68,6 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
                     },
                 };
 
-                println!("  decoding {:?} bytes of raw_data from client...", raw_data.len());
                 let mut new_frames = match frame_decoder.decode(raw_data.to_vec()) {
                     Ok(frames) => frames,
                     Err(e) => {
@@ -74,21 +81,31 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
                     },
                 };
 
-                println!("  decoded {:?} new frames. Handling in order...", new_frames.len());
                 while let Some(frame) = new_frames.pop_front() {
-                    println!("    Frame: {:?}", frame);
+                    println!("hyperreqhandler: Frame: {:?}", frame);
                     match frame_handler.handle_frame(frame, &mut body_sender).await {
-                        Ok(frame::FrameHandlerResult::NewTube(tube)) => {
-                            let mut server_ctx = server_ctx.lock().unwrap();
-                            server_ctx.pending_events.push_back(
-                                ServerEvent::NewTube(tube)
-                            );
-                            if let Some(waker) = server_ctx.waker.take() {
-                                waker.wake();
+                        Ok(frame::FrameHandlerResult::NewTube(mut tube)) => {
+                            if let Some(channel_ctx) = Weak::upgrade(&channel_ctx) {
+                                let mut channel_ctx = channel_ctx.lock().unwrap();
+                                channel_ctx.pending_events.push_back(
+                                    ChannelEvent::NewTube(tube)
+                                );
+                                if let Some(waker) = channel_ctx.waker.take() {
+                                    waker.wake();
+                                }
+                            } else {
+                                eprintln!("hyperreqhandler:  Received a new Tube from the client on a channel that has been dropped!");
+                                match tube.abort_internal(
+                                    frame::AbortReason::ApplicationError
+                                ).await {
+                                    Ok(()) => (),
+                                    Err(e) => 
+                                        eprintln!("hyperreqhandler:    Error aborting tube: `{:?}`", e),
+                                }
                             }
                         },
                         Ok(frame::FrameHandlerResult::FullyHandled) => (),
-                        Err(e) => eprintln!("      Error handling frame: {:?}", e),
+                        Err(e) => eprintln!("hyperreqhandler:  Error handling frame: {:?}", e),
                     }
                 }
             }
@@ -108,6 +125,16 @@ impl TubezMakeSvc {
             server_ctx,
         }
     }
+
+    fn publish_channel(&mut self, channel: Channel) {
+        let mut server_ctx = self.server_ctx.lock().unwrap();
+        server_ctx.pending_events.push_back(
+            Ok(ServerEvent::NewChannel(channel))
+        );
+        if let Some(waker) = server_ctx.waker.take() {
+            waker.wake();
+        }
+    }
 }
 impl<T> hyper::service::Service<T> for TubezMakeSvc {
     type Response = TubezHttpReq;
@@ -122,6 +149,13 @@ impl<T> hyper::service::Service<T> for TubezMakeSvc {
     }
 
     fn call(&mut self, _: T) -> Self::Future {
-        future::ok(TubezHttpReq::new(self.server_ctx.clone()))
+        let channel_ctx = Arc::new(Mutex::new(ChannelContext::new()));
+        let weak_channel = Arc::downgrade(&channel_ctx);
+        let channel = Channel::new(channel_ctx);
+        self.publish_channel(channel);
+        future::ok(TubezHttpReq::new(
+            self.server_ctx.clone(),
+            weak_channel,
+        ))
     }
 }

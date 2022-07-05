@@ -6,13 +6,8 @@ use std::sync::Mutex;
 use crate::common::tube::Tube;
 use super::hyper_tubez_service::TubezMakeSvc;
 use super::server_context::ServerContext;
+use super::server_error::ServerError;
 use super::server_event::ServerEvent;
-
-#[derive(Debug)]
-pub enum ServerError {
-    // TODO: Actually enumerate errors...
-    Err(String)
-}
 
 pub struct Server {
     server_ctx: Arc<Mutex<ServerContext>>,
@@ -39,7 +34,7 @@ impl Server {
                 let mut server_ctx = server_ctx.lock().unwrap();
                 let error_msg = format!("Server error: {}", e);
                 eprintln!("{}", error_msg);
-                server_ctx.pending_events.push_back(ServerEvent::Err(e));
+                server_ctx.pending_events.push_back(Err(ServerError::Err(format!("{:?}", e))));
                 // TODO: Need to iterate all tubes and error them here as well.
                 if let Some(waker) = server_ctx.waker.take() {
                     waker.wake();
@@ -54,9 +49,16 @@ impl Server {
 
         tubez_server
     }
+
+    pub async fn new_tube() /*TODO: -> Tube*/ {
+        // TODO: This is just a boilerplate mitigator...
+        //       Make a channel internal to Server{} and basically hide that 
+        //       channel so that users only have to care about Server emitting 
+        //       ServerEvent::NewTube() events...
+    }
 }
 impl futures::stream::Stream for Server {
-    type Item = Result<Tube, ServerError>;
+    type Item = Result<ServerEvent, ServerError>;
 
     fn poll_next(
         self: core::pin::Pin<&mut Self>,
@@ -64,16 +66,13 @@ impl futures::stream::Stream for Server {
     ) -> futures::task::Poll<Option<Self::Item>> {
         let mut server_ctx = self.server_ctx.lock().unwrap();
         server_ctx.waker = Some(cx.waker().clone());
-        match server_ctx.pending_events.pop_front() {
-          Some(ServerEvent::NewTube(tube)) => futures::task::Poll::Ready(Some(Ok(tube))),
-          Some(ServerEvent::Err(e)) => futures::task::Poll::Ready(Some(Err(
-            ServerError::Err(format!("{}", e))
-          ))),
-          None => 
+        if let Some(event) = server_ctx.pending_events.pop_front() {
+            futures::task::Poll::Ready(Some(event))
+        } else {
             if server_ctx.is_complete {
-              futures::task::Poll::Ready(None)
+                futures::task::Poll::Ready(None)
             } else {
-              futures::task::Poll::Pending
+                futures::task::Poll::Pending
             }
         }
     }

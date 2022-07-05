@@ -1,9 +1,11 @@
 use futures;
 use std::collections::VecDeque;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::common::frame;
+use crate::common::InvertedFuture;
 use crate::common::PeerType;
 use super::sendack_future::SendAckFuture;
 use super::sendack_future::SendAckFutureContext;
@@ -14,6 +16,23 @@ use super::tube_manager::TubeCompletionState;
 use super::tube_manager::TubeManager;
 
 #[derive(Debug)]
+pub enum AbortError {
+    AlreadyAborted(frame::AbortReason),
+    AlreadyClosed,
+    FrameEncodeError(frame::FrameEncodeError),
+    TransportError(hyper::Error),
+}
+
+#[derive(Debug)]
+pub enum HasFinishedSendingError {
+    AlreadyMarkedAsFinishedSending,
+    FrameEncodeError(frame::FrameEncodeError),
+    InternalError(String),
+    FatalTransportError(hyper::Error),
+    TubeAlreadyAborted(frame::AbortReason),
+}
+
+#[derive(Debug)]
 pub enum SendError {
     AckIdAlreadyInUseInternalError,
     FrameEncodeError(frame::FrameEncodeError),
@@ -21,11 +40,44 @@ pub enum SendError {
     UnknownTransportError,
 }
 
-#[derive(Debug)]
-pub enum HasFinishedSendingError {
-    AlreadyMarkedAsFinishedSending,
-    FrameEncodeError(frame::FrameEncodeError),
-    TransportError(hyper::Error),
+async fn send_abort(
+    tube_id: u16,
+    reason: frame::AbortReason,
+    tube_manager: &Arc<Mutex<TubeManager>>,
+    sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,
+) -> Result<(), AbortError> {
+    let frame_data = match frame::encode_abort_frame(tube_id, reason.clone()) {
+        Ok(frame_data) => frame_data,
+        Err(e) => return Err(AbortError::FrameEncodeError(e)),
+    };
+
+    let (pending_future, pending_future_resolver) =
+        InvertedFuture::<Result<frame::AbortReason, AbortError>>::new();
+
+    let prev_state = {
+        let mut tube_mgr = tube_manager.lock().unwrap();
+        match &mut tube_mgr.completion_state {
+            TubeCompletionState::Aborted(reason) => 
+                return Err(AbortError::AlreadyAborted(reason.clone())),
+
+            TubeCompletionState::Closed => 
+                return Err(AbortError::AlreadyClosed),
+                
+            _ => (),
+        };
+
+        let prev_state = tube_mgr.completion_state.clone();
+        tube_mgr.completion_state = TubeCompletionState::Aborted(reason);
+        prev_state
+    };
+
+    // TODO: Stick a timeout on these awaits so that some kind of pathological 
+    //       hyper issue doesn't block the tube_mgr Mutex forever or something
+    let mut sender = sender.lock().await;
+    match sender.send_data(frame_data.into()).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(AbortError::TransportError(e)),
+    }
 }
 
 async fn send_has_finished_sending(
@@ -44,32 +96,57 @@ async fn send_has_finished_sending(
         Ok(data) => data,
         Err(e) => return Err(HasFinishedSendingError::FrameEncodeError(e)),
     };
+
     {
         let mut tube_mgr = tube_manager.lock().unwrap();
         use TubeCompletionState::*;
         use PeerType::*;
-        match (&tube_mgr.completion_state, &peer_type) {
+        let new_state = match (&tube_mgr.completion_state, &peer_type) {
             (&Open, &Client) => 
-                tube_mgr.completion_state = ClientHasFinishedSending,
+                ClientHasFinishedSending,
             (&Open, &Server) => 
-                tube_mgr.completion_state = ServerHasFinishedSending,
-            (&ClientHasFinishedSending, &Server) | (&ServerHasFinishedSending, &Client) => {
-                tube_mgr.completion_state = Closed;
-                if let Some(waker) = tube_mgr.waker.take() {
-                    waker.wake();
-                }
-            },
+                ServerHasFinishedSending,
+            (&ClientHasFinishedSending, &Server) | (&ServerHasFinishedSending, &Client) =>
+                Closed,
             (&ClientHasFinishedSending, &Client) | 
                 (&ServerHasFinishedSending, &Server) |
-                (&Closed, _) => 
+                (&Closed, _) =>
                 return Err(HasFinishedSendingError::AlreadyMarkedAsFinishedSending),
+            (&Aborted(ref reason), _) =>
+                return Err(HasFinishedSendingError::TubeAlreadyAborted(reason.clone())),
         };
+
+        tube_mgr.completion_state = new_state;
     };
-    let mut sender = sender.lock().await;
-    match sender.send_data(frame_data.into()).await {
-        Ok(_) => Ok(()),
-        Err(e) => return Err(HasFinishedSendingError::TransportError(e)),
+
+    // TODO: Stick a timeout on these awaits so that some kind of pathological 
+    //       hyper issue doesn't block the tube_mgr Mutex forever or something
+    let transport_error = {
+        let mut sender = sender.lock().await;
+        match sender.send_data(frame_data.into()).await {
+            Ok(_) => None,
+            Err(e) => Some(e),
+        }
+    };
+
+    // If the transmit failed, we can't be certain if the HasFinishedSending was
+    // actually received by the peer...so [try to] abort the Tube before 
+    // returning a transport error.
+    if let Some(e) = transport_error {
+        let _ = send_abort(
+            tube_id, 
+            frame::AbortReason::TransportErrorWhileSynchronizingTubeState,
+            tube_manager,
+            sender,
+        ).await;
+
+        // At this point the Tube is considered terminal in an Aborted state and
+        // cannot send or receive data. The application must be replace it with
+        // a new Tube.
+        return Err(HasFinishedSendingError::FatalTransportError(e));
     }
+
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -82,6 +159,22 @@ pub struct Tube {
     peer_type: PeerType,
 }
 impl Tube {
+    pub async fn abort(&mut self, ) -> Result<(), AbortError> {
+        self.abort_internal(frame::AbortReason::ApplicationAbort).await
+    }
+    
+    pub(in crate) async fn abort_internal(
+        &mut self, 
+        reason: frame::AbortReason,
+    ) -> Result<(), AbortError> {
+        send_abort(
+            self.tube_id, 
+            reason, 
+            &self.tube_manager,
+            &self.sender,
+        ).await
+    }
+
     pub fn get_id(&self) -> u16 {
         return self.tube_id;
     }
@@ -115,13 +208,17 @@ impl Tube {
         let ack_id = self.take_ackid();
         match frame::encode_payload_frame(self.tube_id, Some(ack_id), data) {
             Ok(frame_data) => {
+                let (sendack_future, sendack_resolver) = InvertedFuture::<()>::new();
+                /*
                 let sendack_ctx = Arc::new(Mutex::new(SendAckFutureContext {
                     ack_received: false,
                     waker: None,
                 }));
+                */
                 {
                     let mut tube_mgr = self.tube_manager.lock().unwrap();
-                    if let Err(_) = tube_mgr.sendacks.try_insert(ack_id, sendack_ctx.clone()) {
+                    //if let Err(_) = tube_mgr.sendacks.try_insert(ack_id, sendack_ctx.clone()) {
+                    if let Err(_) = tube_mgr.sendacks.try_insert(ack_id, sendack_resolver) {
                         return Err(SendError::AckIdAlreadyInUseInternalError)
                     }
                 }
@@ -141,7 +238,7 @@ impl Tube {
                 };
 
                 // TODO: Await this, but with some kind of a timeout...
-                SendAckFuture::new(sendack_ctx).await;
+                sendack_future.await;
 
                 {
                     let mut tube_mgr = self.tube_manager.lock().unwrap();
@@ -210,9 +307,19 @@ impl futures::stream::Stream for Tube {
 
             None => {
                 use TubeCompletionState::*;
-                match tube_mgr.completion_state {
-                    Open | ClientHasFinishedSending => futures::task::Poll::Pending,
-                    Closed | ServerHasFinishedSending => futures::task::Poll::Ready(None),
+                match (&self.peer_type, &tube_mgr.completion_state) {
+                    (_, Aborted(_)) => {
+                        // TODO: Error all pending SendAcks
+                        futures::task::Poll::Ready(None)
+                    },
+
+                    (&PeerType::Client, &Open | &ClientHasFinishedSending) |
+                    (&PeerType::Server, &Open | &ServerHasFinishedSending) => 
+                        futures::task::Poll::Pending,
+
+                    (&PeerType::Client, &Closed | &ServerHasFinishedSending) |
+                    (&PeerType::Server, &Closed | &ClientHasFinishedSending) =>
+                        futures::task::Poll::Ready(None),
                 }
             }
         }
@@ -237,14 +344,12 @@ impl Drop for Tube {
 
         use PeerType::*;
         use TubeCompletionState::*;
+        println!("tube::Drop: Checking completion_state({:?}) before dropping...", &completion_state);
         match (self.peer_type, &completion_state) {
-            (_, &Open) |
+            (_, &Aborted(_) | &Closed) => (),
+
             (Client, &ServerHasFinishedSending) |
             (Server, &ClientHasFinishedSending) => {
-                if let Open = completion_state {
-                    eprintln!("{}", peer_not_finished_str);
-                }
-
                 let peer_type = self.peer_type;
                 let tube_id = self.tube_id;
                 let tube_manager = self.tube_manager.clone();
@@ -266,11 +371,30 @@ impl Drop for Tube {
             },
 
             (Client, &ClientHasFinishedSending) |
-            (Server, &ServerHasFinishedSending) => {
-                eprintln!("{}", peer_not_finished_str);
-                // TODO: Send some kind of Abort frame?
+            (Server, &ServerHasFinishedSending) |
+            (_, &Open) => {
+                eprintln!("Dropping tube(id={}) before {} has finished sending! Sending abort to {}",
+                    self.tube_id,
+                    remote_peer_str,
+                    remote_peer_str,
+                );
+
+                let tube_id = self.tube_id;
+                let tube_manager = self.tube_manager.clone();
+                let sender = self.sender.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = send_abort(
+                        tube_id, 
+                        frame::AbortReason::ApplicationError,
+                        &tube_manager,
+                        &sender,
+                    ).await {
+                        eprintln!("Attempted to send an Abort to the {}, but failed: {:?}", remote_peer_str, e)
+                    }
+                });
             },
-            (_, &Closed) => (),
+
+            _ => todo!(),
         }
     }
 }
@@ -283,16 +407,17 @@ impl Tube {
     }
 }
 
+/*
 #[cfg(test)]
 mod tube_tests {
     use futures::StreamExt;
     use hyper;
     use tokio;
 
-    use super::event::TubeEvent;
-    use super::event::TubeEvent_StreamError;
-    use super::event::TubeEventTag;
-    use super::Tube;
+    use crate::tube::TubeEvent;
+    use crate::tube::TubeEvent_StreamError;
+    use crate::tube::TubeEventTag;
+    use crate::tube::Tube;
 
     #[tokio::test]
     async fn emits_valid_initial_event() {
@@ -392,3 +517,4 @@ mod tube_tests {
         assert_eq!(actual_events, expected_events);
     }
 }
+*/

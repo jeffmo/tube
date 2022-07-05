@@ -6,6 +6,7 @@ pub(in super) const ESTABLISH_STREAMR_FRAMETYPE: u8 = 0x2;
 pub(in super) const PAYLOAD_FRAMETYPE: u8 = 0x3;
 pub(in super) const PAYLOAD_ACK_FRAMETYPE: u8 = 0x4;
 pub(in super) const SERVER_HAS_FINISHED_SENDING_FRAMETYPE: u8 = 0x5;
+pub(in super) const ABORT_FRAMETYPE: u8 = 0x6;
 
 /**
  * Each encoded Tube frame specifies its own structure, but all frames begin 
@@ -22,6 +23,33 @@ pub(in super) const SERVER_HAS_FINISHED_SENDING_FRAMETYPE: u8 = 0x5;
  * FrameBodyByteLength only specifies the size of the frame's body, it does not 
  * account for the 3 bytes used in the frame's header structure.
  */
+#[derive(Clone,Debug,PartialEq)]
+pub enum AbortReason {
+    ApplicationAbort,
+    ApplicationError,
+    TransportErrorWhileSynchronizingTubeState,
+    Unknown,
+}
+impl From<u8> for AbortReason {
+    fn from(reason: u8) -> Self {
+        match reason {
+            0x0 => AbortReason::ApplicationAbort,
+            0x1 => AbortReason::ApplicationError,
+            0x2 => AbortReason::TransportErrorWhileSynchronizingTubeState,
+            _   => AbortReason::Unknown,
+        }
+    }
+}
+impl Into<u8> for AbortReason {
+    fn into(self) -> u8 {
+        match self {
+            AbortReason::ApplicationAbort                          => 0x00,
+            AbortReason::ApplicationError                          => 0x01,
+            AbortReason::TransportErrorWhileSynchronizingTubeState => 0x02,
+            AbortReason::Unknown                                   => 0xFF,
+        }
+    }
+}
 
 #[derive(Clone,Debug,PartialEq)]
 pub enum Frame {
@@ -34,7 +62,7 @@ pub enum Frame {
      *   +---------------+
      */
     ClientHasFinishedSending {
-      tube_id: u16,
+        tube_id: u16,
     },
 
     /**
@@ -56,8 +84,8 @@ pub enum Frame {
      *   +---------------+-----------------------------+
      */
     EstablishTube {
-      tube_id: u16,
-      headers: HashMap<String, String>,
+        tube_id: u16,
+        headers: HashMap<String, String>,
     },
 
     /**
@@ -68,9 +96,9 @@ pub enum Frame {
      *   +---------------+-------------------+-------------+-----------+
      */
     Payload {
-      tube_id: u16,
-      ack_id: Option<u16>,
-      data: Vec<u8>,
+        tube_id: u16,
+        ack_id: Option<u16>,
+        data: Vec<u8>,
     },
 
     /**
@@ -84,8 +112,8 @@ pub enum Frame {
      *   +---------------+---------------+-------------+
      */
     PayloadAck {
-      tube_id: u16,
-      ack_id: u16,
+        tube_id: u16,
+        ack_id: u16,
     },
 
     /**
@@ -97,6 +125,20 @@ pub enum Frame {
      *   +---------------+
      */
     ServerHasFinishedSending {
-      tube_id: u16,
+        tube_id: u16,
+    },
+
+    /**
+     * This frame is sent by either peer in order to immediately end the Tube, 
+     * no waiting for both peers to agree by sending their respective 
+     * HasFinishedSending frame.
+     *
+     *   +-----------------------------------+
+     *   |  TubeId(u16)  |  AbortReason(u8)  |
+     *   +-----------------------------------+
+     */
+    Abort {
+        tube_id: u16,
+        reason: AbortReason,
     },
 }

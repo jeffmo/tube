@@ -11,6 +11,21 @@ pub enum FrameEncodeError {
     HeaderJsonEncodeError(serde_json::error::Error),
 }
 
+pub fn encode_abort_frame(
+    tube_id: u16,
+    reason: frame::AbortReason,
+) -> Result<Vec<u8>, FrameEncodeError> {
+    let tubeid_bytes = tube_id.to_be_bytes();
+    let reason_u8: u8 = reason.into();
+    Ok(vec![
+       frame::ABORT_FRAMETYPE,
+       0, 3,
+       tubeid_bytes[0],
+       tubeid_bytes[1],
+       reason_u8,
+    ])
+}
+
 pub fn encode_client_has_finished_sending_frame(
     tube_id: u16,
 ) -> Result<Vec<u8>, FrameEncodeError> {

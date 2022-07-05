@@ -44,12 +44,12 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
         },
 
         // Drain
-        1 => {
+       frame::DRAIN_FRAMETYPE => {
             Ok(frame::Frame::Drain)
         },
 
         // EstablishTube
-        2 => {
+        frame::ESTABLISH_STREAMR_FRAMETYPE => {
             let mut header_bytes = frame_body_data.split_off(2);
             let tube_id = double_u8_to_u16(
                 frame_body_data[0],
@@ -67,7 +67,7 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
         },
 
         // Payload
-        3 => {
+        frame::PAYLOAD_FRAMETYPE => {
             let data = frame_body_data.split_off(4).make_contiguous().to_vec();
             let tube_id = double_u8_to_u16(
                 frame_body_data[0],
@@ -89,7 +89,7 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
         },
 
         // PayloadAck
-        4 => {
+        frame::PAYLOAD_ACK_FRAMETYPE => {
             let tube_id = double_u8_to_u16(
                 frame_body_data[0],
                 frame_body_data[1],
@@ -108,12 +108,24 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
         },
 
         // ServerHasFinishedSending
-        5 => {
+        frame::SERVER_HAS_FINISHED_SENDING_FRAMETYPE => {
             let tube_id = double_u8_to_u16(
                 frame_body_data[0],
                 frame_body_data[1],
             );
             Ok(frame::Frame::ServerHasFinishedSending { tube_id })
+        },
+
+        frame::ABORT_FRAMETYPE => {
+            let tube_id = double_u8_to_u16(
+                frame_body_data[0],
+                frame_body_data[1],
+            );
+            let reason = frame::AbortReason::from(frame_body_data[2]);
+            Ok(frame::Frame::Abort {
+                tube_id,
+                reason,
+            })
         },
 
         _ => Err(FrameParseError::UnknownFrameType(frame_type)),

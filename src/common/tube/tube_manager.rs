@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::task;
 
+use crate::common::frame;
+use crate::common::InvertedFutureResolver;
 use super::sendack_future::SendAckFutureContext;
 use super::tube_event;
 
@@ -13,12 +16,13 @@ pub(in crate) enum TubeCompletionState {
     ClientHasFinishedSending,
     ServerHasFinishedSending,
     Closed,
+    Aborted(frame::AbortReason),
 }
 
 #[derive(Debug)]
 pub(in crate) struct TubeManager {
     pub(in crate) pending_events: VecDeque<tube_event::TubeEvent>,
-    pub(in crate) sendacks: HashMap<u16, Arc<Mutex<SendAckFutureContext>>>,
+    pub(in crate) sendacks: HashMap<u16, InvertedFutureResolver<()>>,
     pub(in crate) state_machine: tube_event::StateMachine,
     pub(in crate) terminated: bool,
     pub(in crate) completion_state: TubeCompletionState,

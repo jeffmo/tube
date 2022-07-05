@@ -1,16 +1,17 @@
-pub(in crate) use decoder::Decoder;
-pub(in crate) use decoder::FrameDecodeError;
-pub(in crate) use decoder::FrameParseError;
-pub(in crate) use encoder::*;
-pub(in crate) use frame::Frame;
-pub(in crate) use frame_handler::FrameHandler;
-pub(in crate) use frame_handler::FrameHandlerError;
-pub(in crate) use frame_handler::FrameHandlerResult;
-
 mod decoder;
 mod encoder;
 mod frame;
 mod frame_handler;
+
+pub(in crate) use decoder::Decoder;
+pub(in crate) use decoder::FrameDecodeError;
+pub(in crate) use decoder::FrameParseError;
+pub(in crate) use encoder::*;
+pub(in crate) use frame::AbortReason;
+pub(in crate) use frame::Frame;
+pub(in crate) use frame_handler::FrameHandler;
+pub(in crate) use frame_handler::FrameHandlerError;
+pub(in crate) use frame_handler::FrameHandlerResult;
 
 #[cfg(test)]
 mod codec_tests {

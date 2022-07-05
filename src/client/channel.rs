@@ -60,8 +60,8 @@ impl Channel {
                 // This seems hacky...but it works.
                 //
                 // When the sender is dropped, res_body.data().await yields 
-                // Some(Buf{}) -- aka an empty Buf. Weird...but I guess it 
-                // works?
+                // Some(Buf{}) (an empty Buf)...presumably to indicate EOM? 
+                // Weird...but I guess it works?
                 //
                 // A better solution might be to wrap res_body.data() inside some
                 // stream that ends when EITHER .data() returns None OR 

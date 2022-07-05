@@ -11,8 +11,10 @@ use super::frame;
 pub(in crate) enum FrameHandlerError {
     AckFrameEncodingError(encoder::FrameEncodeError),
     AckFrameTransmitError(hyper::Error),
+    DuplicateAbortFrame { tube_id: u16 },
     DuplicateHasFinishedSendingFrame { tube_id: u16 },
     InappropriateHasFinishedSendingFrameFromPeer,
+    ReceivedHasFinishedSendingAfterRemoteAbort { tube_id: u16 },
     ServerInitiatedTubesNotImplemented,
     TubeManagerInsertionError { tube_id: u16 },
     UntrackedAckId {
@@ -67,34 +69,48 @@ impl<'a> FrameHandler<'a> {
                 if let PeerType::Client = self.peer_type {
                     return Err(FrameHandlerError::InappropriateHasFinishedSendingFrameFromPeer);
                 }
+
                 let tube_mgr = match self.get_tube_mgr(&tube_id) {
                     Some(tm) => tm,
                     None => return Err(FrameHandlerError::UntrackedTubeId(frame)),
                 };
 
-                let mut tube_mgr = tube_mgr.lock().unwrap();
-                let new_state = {
-                    use tube::TubeCompletionState::*;
-                    match tube_mgr.completion_state {
-                        Open => 
-                            ClientHasFinishedSending,
-                        ServerHasFinishedSending => 
-                            Closed,
-                        ClientHasFinishedSending | Closed => 
-                            return Err(FrameHandlerError::DuplicateHasFinishedSendingFrame {
-                                tube_id,
-                            }),
+                let should_remove_tube_mgr = {
+                    let mut tube_mgr = tube_mgr.lock().unwrap();
+                    let new_state = {
+                        use tube::TubeCompletionState::*;
+                        match tube_mgr.completion_state {
+                            Open => 
+                                ClientHasFinishedSending,
+                            ServerHasFinishedSending => 
+                                Closed,
+                            ClientHasFinishedSending | Closed => 
+                                return Err(FrameHandlerError::DuplicateHasFinishedSendingFrame {
+                                    tube_id,
+                                }),
+                            Aborted(_) => 
+                                return Err(FrameHandlerError::ReceivedHasFinishedSendingAfterRemoteAbort {
+                                    tube_id,
+                                }),
+                            _ => todo!(),
+                        }
+                    };
+
+                    if tube_mgr.completion_state != new_state {
+                        tube_mgr.completion_state = new_state.clone();
+                        if tube_mgr.completion_state == tube::TubeCompletionState::ClientHasFinishedSending {
+                            tube_mgr.pending_events.push_back(tube::TubeEvent::ClientHasFinishedSending);
+                        }
+                        if let Some(waker) = tube_mgr.waker.take() {
+                          waker.wake();
+                        }
                     }
+
+                    tube::TubeCompletionState::Closed == new_state
                 };
 
-                if tube_mgr.completion_state != new_state {
-                    tube_mgr.completion_state = new_state;
-                    if tube_mgr.completion_state == tube::TubeCompletionState::ClientHasFinishedSending {
-                        tube_mgr.pending_events.push_back(tube::TubeEvent::ClientHasFinishedSending);
-                    }
-                    if let Some(waker) = tube_mgr.waker.take() {
-                      waker.wake();
-                    }
+                if should_remove_tube_mgr {
+                    self.tube_managers.lock().unwrap().remove(&tube_id);
                 }
             },
 
@@ -176,6 +192,7 @@ impl<'a> FrameHandler<'a> {
                     waker.wake();
                 }
             },
+
             frame::Frame::PayloadAck {
                 tube_id,
                 ack_id,
@@ -185,25 +202,16 @@ impl<'a> FrameHandler<'a> {
                     None => return Err(FrameHandlerError::UntrackedTubeId(frame)),
                 };
 
-                let sendack_ctx = {
-                    let tube_mgr = tube_mgr.lock().unwrap();
-                    match tube_mgr.sendacks.get(&ack_id) {
-                        Some(ctx) => ctx.clone(),
-                        None => return Err(FrameHandlerError::UntrackedAckId {
-                            tube_id,
-                            ack_id
-                        }),
-                    }
+                let mut tube_mgr = tube_mgr.lock().unwrap();
+                match tube_mgr.sendacks.get_mut(&ack_id) {
+                    Some(mut res) => res.resolve(()),
+                    None => return Err(FrameHandlerError::UntrackedAckId {
+                        tube_id,
+                        ack_id
+                    }),
                 };
-
-                {
-                    let mut sendack_ctx = sendack_ctx.lock().unwrap();
-                    sendack_ctx.ack_received = true;
-                    if let Some(waker) = sendack_ctx.waker.take() {
-                      waker.wake();
-                    }
-                }
             },
+
             frame::Frame::ServerHasFinishedSending {
                 tube_id,
             } => {
@@ -216,31 +224,70 @@ impl<'a> FrameHandler<'a> {
                     None => return Err(FrameHandlerError::UntrackedTubeId(frame)),
                 };
 
-                let mut tube_mgr = tube_mgr.lock().unwrap();
-                let new_state = {
-                    use tube::TubeCompletionState::*;
-                    match tube_mgr.completion_state {
-                        Open => 
-                            ServerHasFinishedSending,
-                        ClientHasFinishedSending => 
-                            Closed,
-                        ServerHasFinishedSending | Closed =>
-                            return Err(FrameHandlerError::DuplicateHasFinishedSendingFrame {
-                                tube_id,
-                            }),
+                let should_remove_tube_mgr = {
+                    let mut tube_mgr = tube_mgr.lock().unwrap();
+                    let new_state = {
+                        use tube::TubeCompletionState::*;
+                        match tube_mgr.completion_state {
+                            Open => 
+                                ServerHasFinishedSending,
+                            ClientHasFinishedSending => 
+                                Closed,
+                            ServerHasFinishedSending | Closed =>
+                                return Err(FrameHandlerError::DuplicateHasFinishedSendingFrame {
+                                    tube_id,
+                                }),
+                            Aborted(_) => 
+                                return Err(FrameHandlerError::ReceivedHasFinishedSendingAfterRemoteAbort {
+                                    tube_id,
+                                }),
+                            _ => todo!(),
+                        }
+                    };
+
+                    if tube_mgr.completion_state != new_state {
+                        tube_mgr.completion_state = new_state.clone();
+                        if tube_mgr.completion_state == tube::TubeCompletionState::ServerHasFinishedSending {
+                            tube_mgr.pending_events.push_back(tube::TubeEvent::ServerHasFinishedSending);
+                        }
+                        if let Some(waker) = tube_mgr.waker.take() {
+                            waker.wake();
+                        }
+                    }
+
+                    tube::TubeCompletionState::Closed == new_state
+                };
+
+                if should_remove_tube_mgr {
+                    self.tube_managers.lock().unwrap().remove(&tube_id);
+                }
+            },
+
+            frame::Frame::Abort {
+                tube_id,
+                ref reason,
+            } => {
+                let tube_mgr = match self.get_tube_mgr(&tube_id) {
+                    Some(tm) => tm,
+                    None => return Err(FrameHandlerError::UntrackedTubeId(frame)),
+                };
+
+                {
+                    let mut tube_mgr = tube_mgr.lock().unwrap();
+                    if let tube::TubeCompletionState::Aborted(_) = tube_mgr.completion_state {
+                        return Err(FrameHandlerError::DuplicateAbortFrame {
+                            tube_id,
+                        });
+                    }
+                    tube_mgr.completion_state = tube::TubeCompletionState::Aborted(reason.clone());
+                    tube_mgr.pending_events.push_back(tube::TubeEvent::Abort(reason.clone()));
+                    if let Some(waker) = tube_mgr.waker.take() {
+                        waker.wake();
                     }
                 };
 
-                if tube_mgr.completion_state != new_state {
-                    tube_mgr.completion_state = new_state;
-                    if tube_mgr.completion_state == tube::TubeCompletionState::ServerHasFinishedSending {
-                        tube_mgr.pending_events.push_back(tube::TubeEvent::ServerHasFinishedSending);
-                    }
-                    if let Some(waker) = tube_mgr.waker.take() {
-                      waker.wake();
-                    }
-                }
-            },
+                self.tube_managers.lock().unwrap().remove(&tube_id);
+            }
         };
 
         Ok(FrameHandlerResult::FullyHandled)
