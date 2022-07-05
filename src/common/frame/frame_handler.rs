@@ -4,6 +4,7 @@ use std::sync::Mutex;
 
 use crate::common::PeerType;
 use crate::common::tube;
+use crate::common::tube::TubeCompletionState;
 use super::encoder;
 use super::frame;
 
@@ -88,11 +89,12 @@ impl<'a> FrameHandler<'a> {
                                 return Err(FrameHandlerError::DuplicateHasFinishedSendingFrame {
                                     tube_id,
                                 }),
-                            Aborted(_) => 
+                            AbortedFromRemote(_) => 
                                 return Err(FrameHandlerError::ReceivedHasFinishedSendingAfterRemoteAbort {
                                     tube_id,
                                 }),
-                            _ => todo!(),
+                            AbortedFromLocal(_) =>
+                                return Ok(FrameHandlerResult::FullyHandled),
                         }
                     };
 
@@ -237,11 +239,12 @@ impl<'a> FrameHandler<'a> {
                                 return Err(FrameHandlerError::DuplicateHasFinishedSendingFrame {
                                     tube_id,
                                 }),
-                            Aborted(_) => 
+                            AbortedFromRemote(_) => 
                                 return Err(FrameHandlerError::ReceivedHasFinishedSendingAfterRemoteAbort {
                                     tube_id,
                                 }),
-                            _ => todo!(),
+                            AbortedFromLocal(_) =>
+                                return Ok(FrameHandlerResult::FullyHandled),
                         }
                     };
 
@@ -274,15 +277,22 @@ impl<'a> FrameHandler<'a> {
 
                 {
                     let mut tube_mgr = tube_mgr.lock().unwrap();
-                    if let tube::TubeCompletionState::Aborted(_) = tube_mgr.completion_state {
-                        return Err(FrameHandlerError::DuplicateAbortFrame {
-                            tube_id,
-                        });
-                    }
-                    tube_mgr.completion_state = tube::TubeCompletionState::Aborted(reason.clone());
-                    tube_mgr.pending_events.push_back(tube::TubeEvent::Abort(reason.clone()));
-                    if let Some(waker) = tube_mgr.waker.take() {
-                        waker.wake();
+                    match tube_mgr.completion_state {
+                        TubeCompletionState::AbortedFromRemote(_) =>
+                            return Err(FrameHandlerError::DuplicateAbortFrame {
+                                tube_id,
+                            }),
+
+                        TubeCompletionState::AbortedFromLocal(_) => (),
+
+                        _ => {
+                            tube_mgr.completion_state = 
+                                TubeCompletionState::AbortedFromLocal(reason.clone());
+                            tube_mgr.pending_events.push_back(tube::TubeEvent::Abort(reason.clone()));
+                            if let Some(waker) = tube_mgr.waker.take() {
+                                waker.wake();
+                            }
+                        },
                     }
                 };
 

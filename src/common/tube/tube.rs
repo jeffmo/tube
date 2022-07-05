@@ -57,7 +57,8 @@ async fn send_abort(
     let prev_state = {
         let mut tube_mgr = tube_manager.lock().unwrap();
         match &mut tube_mgr.completion_state {
-            TubeCompletionState::Aborted(reason) => 
+            TubeCompletionState::AbortedFromLocal(reason) | 
+                TubeCompletionState::AbortedFromRemote(reason) => 
                 return Err(AbortError::AlreadyAborted(reason.clone())),
 
             TubeCompletionState::Closed => 
@@ -67,7 +68,7 @@ async fn send_abort(
         };
 
         let prev_state = tube_mgr.completion_state.clone();
-        tube_mgr.completion_state = TubeCompletionState::Aborted(reason);
+        tube_mgr.completion_state = TubeCompletionState::AbortedFromLocal(reason);
         prev_state
     };
 
@@ -112,7 +113,8 @@ async fn send_has_finished_sending(
                 (&ServerHasFinishedSending, &Server) |
                 (&Closed, _) =>
                 return Err(HasFinishedSendingError::AlreadyMarkedAsFinishedSending),
-            (&Aborted(ref reason), _) =>
+            (&AbortedFromLocal(ref reason), _) |
+                (&AbortedFromRemote(ref reason), _) =>
                 return Err(HasFinishedSendingError::TubeAlreadyAborted(reason.clone())),
         };
 
@@ -308,7 +310,8 @@ impl futures::stream::Stream for Tube {
             None => {
                 use TubeCompletionState::*;
                 match (&self.peer_type, &tube_mgr.completion_state) {
-                    (_, Aborted(_)) => {
+                    (_, AbortedFromLocal(_)) |
+                        (_, AbortedFromRemote(_)) => {
                         // TODO: Error all pending SendAcks
                         futures::task::Poll::Ready(None)
                     },
@@ -346,7 +349,7 @@ impl Drop for Tube {
         use TubeCompletionState::*;
         println!("tube::Drop: Checking completion_state({:?}) before dropping...", &completion_state);
         match (self.peer_type, &completion_state) {
-            (_, &Aborted(_) | &Closed) => (),
+            (_, &AbortedFromLocal(_) | &AbortedFromRemote(_) | &Closed) => (),
 
             (Client, &ServerHasFinishedSending) |
             (Server, &ClientHasFinishedSending) => {

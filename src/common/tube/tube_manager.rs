@@ -16,7 +16,8 @@ pub(in crate) enum TubeCompletionState {
     ClientHasFinishedSending,
     ServerHasFinishedSending,
     Closed,
-    Aborted(frame::AbortReason),
+    AbortedFromLocal(frame::AbortReason),
+    AbortedFromRemote(frame::AbortReason),
 }
 
 #[derive(Debug)]

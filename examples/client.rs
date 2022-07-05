@@ -58,7 +58,7 @@ async fn main() {
     tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
 
     let tube2_headers = HashMap::new();
-    let _tube2 = match channel.make_tube(tube2_headers).await {
+    let tube2 = match channel.make_tube(tube2_headers).await {
         Ok(tube) => tube,
         Err(e) => {
             println!("Error creating tube: {:?}", e);
@@ -70,8 +70,8 @@ async fn main() {
     while let Some(tube_event) = tube1.next().await {
       println!("Tubeevent: {:?}", tube_event);
     }
-    //std::mem::drop(tube1);
-    //std::mem::drop(tube2);
+    std::mem::drop(tube1);
+    std::mem::drop(tube2);
     println!("No more tube events! Dropping channel in 3 seconds...");
     tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
     std::mem::drop(channel);

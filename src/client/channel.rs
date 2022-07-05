@@ -73,7 +73,6 @@ impl Channel {
                     None => break,
                 };
 
-                println!("Server data received!");
                 let raw_data = match data_result {
                     Ok(data) => data,
                     Err(e) => {
@@ -82,7 +81,6 @@ impl Channel {
                     }
                 };
 
-                println!("  decoding {:?} bytes of raw_data from server...", raw_data.len());
                 let mut new_frames = match frame_decoder.decode(raw_data.to_vec()) {
                     Ok(frames) => frames,
                     Err(e) => {
@@ -96,7 +94,6 @@ impl Channel {
                     },
                 };
 
-                println!("  decoded {:?} new frames. Handling in order...", new_frames.len());
                 while let Some(frame) = new_frames.pop_front() {
                     println!("    Frame: {:?}", frame);
                     match frame_handler.handle_frame(frame, &mut body_sender).await {
