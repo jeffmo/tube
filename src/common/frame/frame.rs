@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 pub(in super) const CLIENT_HAS_FINISHED_SENDING_FRAMETYPE: u8 = 0x0;
 pub(in super) const DRAIN_FRAMETYPE: u8 = 0x1;
-pub(in super) const ESTABLISH_STREAMR_FRAMETYPE: u8 = 0x2;
+pub(in super) const NEWTUBE_FRAMETYPE: u8 = 0x2;
 pub(in super) const PAYLOAD_FRAMETYPE: u8 = 0x3;
 pub(in super) const PAYLOAD_ACK_FRAMETYPE: u8 = 0x4;
 pub(in super) const SERVER_HAS_FINISHED_SENDING_FRAMETYPE: u8 = 0x5;
@@ -83,7 +83,7 @@ pub enum Frame {
      *   |  TubeId(u16)  |  Utf8EncodedJSONHeaders(*)  |
      *   +---------------+-----------------------------+
      */
-    EstablishTube {
+    NewTube {
         tube_id: u16,
         headers: HashMap<String, String>,
     },

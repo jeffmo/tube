@@ -43,7 +43,7 @@ mod codec_tests {
     }
 
     #[test]
-    fn establishtube_frame_encodes_and_decodes() {
+    fn newtube_frame_encodes_and_decodes() {
         let tube_id = 65000;
         let encoded_headers = HashMap::from([
           ("header1".to_string(), "value1".to_string()),
@@ -52,12 +52,12 @@ mod codec_tests {
         let expected_headers = encoded_headers.clone();
 
         let encoded_bytes = 
-          encode_establish_tube_frame(tube_id, encoded_headers).unwrap();
+          encode_newtube_frame(tube_id, encoded_headers).unwrap();
 
         let mut decoder = Decoder::new();
         let frames = decoder.decode(encoded_bytes).unwrap();
         assert_eq!(frames.len(), 1);
-        assert_eq!(frames[0], Frame::EstablishTube {
+        assert_eq!(frames[0], Frame::NewTube {
           tube_id,
           headers: expected_headers,
         });

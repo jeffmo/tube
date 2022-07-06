@@ -34,7 +34,6 @@ fn double_u8_to_u16(left_byte: u8, right_byte: u8) -> u16 {
 fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>) 
         -> Result<frame::Frame, FrameParseError> {
     match frame_type {
-        // ClientHasFinishedSending
         frame::CLIENT_HAS_FINISHED_SENDING_FRAMETYPE => {
             let tube_id = double_u8_to_u16(
                 frame_body_data[0],
@@ -43,13 +42,11 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
             Ok(frame::Frame::ClientHasFinishedSending { tube_id })
         },
 
-        // Drain
        frame::DRAIN_FRAMETYPE => {
             Ok(frame::Frame::Drain)
         },
 
-        // EstablishTube
-        frame::ESTABLISH_STREAMR_FRAMETYPE => {
+        frame::NEWTUBE_FRAMETYPE => {
             let mut header_bytes = frame_body_data.split_off(2);
             let tube_id = double_u8_to_u16(
                 frame_body_data[0],
@@ -63,10 +60,9 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
                 Ok(headers) => headers,
                 Err(json_err) => return Err(FrameParseError::HeaderJsonDecodeError(json_err))
             };
-            Ok(frame::Frame::EstablishTube { tube_id, headers })
+            Ok(frame::Frame::NewTube { tube_id, headers })
         },
 
-        // Payload
         frame::PAYLOAD_FRAMETYPE => {
             let data = frame_body_data.split_off(4).make_contiguous().to_vec();
             let tube_id = double_u8_to_u16(
@@ -88,7 +84,6 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
             Ok(frame::Frame::Payload { tube_id, ack_id, data })
         },
 
-        // PayloadAck
         frame::PAYLOAD_ACK_FRAMETYPE => {
             let tube_id = double_u8_to_u16(
                 frame_body_data[0],
@@ -107,7 +102,6 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
             Ok(frame::Frame::PayloadAck { tube_id, ack_id })
         },
 
-        // ServerHasFinishedSending
         frame::SERVER_HAS_FINISHED_SENDING_FRAMETYPE => {
             let tube_id = double_u8_to_u16(
                 frame_body_data[0],
@@ -256,14 +250,14 @@ mod decoder_tests {
     }
 
     #[test]
-    fn errors_if_invalid_utf8_passed_for_establishtube_headers() {
+    fn errors_if_invalid_utf8_passed_for_newtube_headers() {
         let mut decoder = Decoder::new();
 
         let headers = HashMap::from([
           ("header1".to_string(), "value1".to_string()),
           ("header2".to_string(), "value2".to_string()),
         ]);
-        let mut data = encode_establish_tube_frame(42, headers).unwrap();
+        let mut data = encode_newtube_frame(42, headers).unwrap();
 
         // Tweak encoded data to insert an invalid utf8 byte into the encoded 
         // headers region of the frame.
@@ -272,7 +266,7 @@ mod decoder_tests {
 
         match &decoder.decode(data) {
             Ok(_frames) => panic!(concat!(
-                "Successfully decoded an EstablishTube frame that contains ",
+                "Successfully decoded a NewTube frame that contains ",
                 "invalid utf8!"
             )),
 
@@ -283,7 +277,7 @@ mod decoder_tests {
 
             Err(err) => panic!(
                 concat!(
-                    "Correctly errored on an EstablishTube frame with ",
+                    "Correctly errored on a NewTube frame with ",
                     "invalid utf8, but provided an unexpected error value: {:?}"
                 ), 
                 err
@@ -292,11 +286,11 @@ mod decoder_tests {
     }
 
     #[test]
-    fn errors_if_invalid_json_passed_for_establishtube_headers() {
+    fn errors_if_invalid_json_passed_for_newtube_headers() {
         let mut decoder = Decoder::new();
 
         let headers = HashMap::from([]);
-        let correct_data = encode_establish_tube_frame(42, headers).unwrap();
+        let correct_data = encode_newtube_frame(42, headers).unwrap();
 
         // Tweak encoded data to insert invalid json into the headers portion 
         // of the frame.
@@ -318,7 +312,7 @@ mod decoder_tests {
 
         match &decoder.decode(bad_data) {
             Ok(_frames) => panic!(concat!(
-                "Successfully decoded an EstablishTube frame that contains ",
+                "Successfully decoded a NewTube frame that contains ",
                 "an invalid json encoding of it's headers!"
             )),
 
@@ -329,7 +323,7 @@ mod decoder_tests {
 
             Err(err) => panic!(
                 concat!(
-                    "Correctly errored on an EstablishTube frame with invalid ",
+                    "Correctly errored on a NewTube frame with invalid ",
                     "utf8, but provided an unexpected error value: {:?}"
                 ), 
                 err

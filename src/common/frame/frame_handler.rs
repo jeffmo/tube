@@ -120,7 +120,7 @@ impl<'a> FrameHandler<'a> {
                 // TODO
             },
 
-            frame::Frame::EstablishTube { 
+            frame::Frame::NewTube { 
                 tube_id, 
                 headers,
             } => {

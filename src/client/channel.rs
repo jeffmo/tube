@@ -119,7 +119,7 @@ impl Channel {
         headers: HashMap<String, String>,
     ) -> Result<tube::Tube, MakeTubeError> {
         let tube_id = self.new_tube_id();
-        let estab_tube_frame = match frame::encode_establish_tube_frame(tube_id, headers) {
+        let estab_tube_frame = match frame::encode_newtube_frame(tube_id, headers) {
             Ok(data) => data,
             Err(e) => return Err(MakeTubeError::FrameEncodeError(e)),
         };
@@ -132,8 +132,8 @@ impl Channel {
             };
         };
 
-        println!("Awaiting response EstablishTube frame...(TODO)");
-        // TODO: Await the return of an EstablishTube frame from the server here 
+        println!("Awaiting response NewTube frame...(TODO)");
+        // TODO: Await the return of an NewTube frame from the server here 
         //       before creating a Tube and returning it.
 
         let tube_mgr = Arc::new(Mutex::new(tube::TubeManager::new()));

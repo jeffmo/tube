@@ -46,7 +46,7 @@ pub fn encode_drain_frame() -> Result<Vec<u8>, FrameEncodeError> {
     ])
 }
 
-pub fn encode_establish_tube_frame(
+pub fn encode_newtube_frame(
     tube_id: u16, 
     headers: HashMap<String, String>
 ) -> Result<Vec<u8>, FrameEncodeError> {
@@ -58,7 +58,7 @@ pub fn encode_establish_tube_frame(
     let body_len: u16 = 2 + (headers_json_str_bytes.len() as u16);
     let body_len_bytes = body_len.to_be_bytes();
     let mut bytes = vec![
-        frame::ESTABLISH_STREAMR_FRAMETYPE, 
+        frame::NEWTUBE_FRAMETYPE, 
         body_len_bytes[0],
         body_len_bytes[1],
         tubeid_bytes[0], 
