@@ -122,7 +122,7 @@ impl<'a> FrameHandler<'a> {
 
             frame::Frame::NewTube { 
                 tube_id, 
-                headers,
+                headers: _, // TODO
             } => {
                 if let PeerType::Client = self.peer_type {
                     return Err(FrameHandlerError::ServerInitiatedTubesNotImplemented);
@@ -206,7 +206,7 @@ impl<'a> FrameHandler<'a> {
 
                 let mut tube_mgr = tube_mgr.lock().unwrap();
                 match tube_mgr.sendacks.get_mut(&ack_id) {
-                    Some(mut res) => res.resolve(()),
+                    Some(res) => res.resolve(()),
                     None => return Err(FrameHandlerError::UntrackedAckId {
                         tube_id,
                         ack_id

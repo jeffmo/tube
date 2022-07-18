@@ -50,7 +50,7 @@ async fn main() {
     tube1.send("tube1 data!".into()).await.unwrap();
     println!("received ack for data sent on tube1!");
     println!("client has finished...");
-    tube1.has_finished_sending().await;
+    tube1.has_finished_sending().await.expect("tube1 failed sending ClientHasFinished");
 
     println!("Waiting 3 secs before creating 2nd tube...");
     // TODO: Deleting this kills the transport... Probably need to gracefully 

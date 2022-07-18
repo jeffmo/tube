@@ -1,14 +1,11 @@
 use futures;
 use std::collections::VecDeque;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::common::frame;
 use crate::common::InvertedFuture;
 use crate::common::PeerType;
-use super::sendack_future::SendAckFuture;
-use super::sendack_future::SendAckFutureContext;
 use super::tube_event;
 use super::tube_event::TubeEvent;
 use super::tube_event::TubeEvent_StreamError;
@@ -51,10 +48,7 @@ async fn send_abort(
         Err(e) => return Err(AbortError::FrameEncodeError(e)),
     };
 
-    let (pending_future, pending_future_resolver) =
-        InvertedFuture::<Result<frame::AbortReason, AbortError>>::new();
-
-    let prev_state = {
+    {
         let mut tube_mgr = tube_manager.lock().unwrap();
         match &mut tube_mgr.completion_state {
             TubeCompletionState::AbortedFromLocal(reason) | 
@@ -67,9 +61,7 @@ async fn send_abort(
             _ => (),
         };
 
-        let prev_state = tube_mgr.completion_state.clone();
         tube_mgr.completion_state = TubeCompletionState::AbortedFromLocal(reason);
-        prev_state
     };
 
     // TODO: Stick a timeout on these awaits so that some kind of pathological 
@@ -211,15 +203,8 @@ impl Tube {
         match frame::encode_payload_frame(self.tube_id, Some(ack_id), data) {
             Ok(frame_data) => {
                 let (sendack_future, sendack_resolver) = InvertedFuture::<()>::new();
-                /*
-                let sendack_ctx = Arc::new(Mutex::new(SendAckFutureContext {
-                    ack_received: false,
-                    waker: None,
-                }));
-                */
                 {
                     let mut tube_mgr = self.tube_manager.lock().unwrap();
-                    //if let Err(_) = tube_mgr.sendacks.try_insert(ack_id, sendack_ctx.clone()) {
                     if let Err(_) = tube_mgr.sendacks.try_insert(ack_id, sendack_resolver) {
                         return Err(SendError::AckIdAlreadyInUseInternalError)
                     }
@@ -396,8 +381,6 @@ impl Drop for Tube {
                     }
                 });
             },
-
-            _ => todo!(),
         }
     }
 }

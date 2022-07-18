@@ -70,7 +70,7 @@ async fn main() {
         },
         */
 
-        Ok(ServerEvent::NewChannel(mut channel)) => {
+        Ok(ServerEvent::NewChannel(channel)) => {
             println!("New channel has arrived!");
             spawn_channel_handler(channel);
         },
