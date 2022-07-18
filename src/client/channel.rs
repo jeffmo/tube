@@ -38,7 +38,7 @@ impl Channel {
           .body(req_body)
           .unwrap();
 
-        println!("Sending channel request...");
+        log::trace!("Sending channel request...");
         let response = match hyper_client.request(req).await {
             Ok(response) => response,
             Err(e) => return Err(ChannelConnectError::InitError(e)),
@@ -76,7 +76,7 @@ impl Channel {
                 let raw_data = match data_result {
                     Ok(data) => data,
                     Err(e) => {
-                        println!("  stream of data from server has errored: `{:?}`", e);
+                        log::trace!("Stream of data from server has errored: `{:?}`", e);
                         break;
                     }
                 };
@@ -89,19 +89,19 @@ impl Channel {
                         // 
                         //       For now just log and ignore to avoid some kind of hand-wavy 
                         //       DDOS situation
-                        eprintln!("frame decode error: {:?}", e);
+                        log::error!("frame decode error: {:?}", e);
                         return;
                     },
                 };
 
                 while let Some(frame) = new_frames.pop_front() {
-                    println!("    Frame: {:?}", frame);
+                    log::trace!("Processing frame: {:?}", frame);
                     match frame_handler.handle_frame(frame, &mut body_sender).await {
                         Ok(frame::FrameHandlerResult::NewTube(tube)) => {
                             // TODO: Server-initiated tubes aren't supported yet.
                         },
                         Ok(frame::FrameHandlerResult::FullyHandled) => (),
-                        Err(e) => eprintln!("      Error handling frame: {:?}", e),
+                        Err(e) => log::error!("Error handling frame: {:?}", e),
                     }
                 }
             }
@@ -132,7 +132,7 @@ impl Channel {
             };
         };
 
-        println!("Awaiting response NewTube frame...(TODO)");
+        log::trace!("Awaiting response NewTube frame...(TODO)");
         // TODO: Await the return of an NewTube frame from the server here 
         //       before creating a Tube and returning it.
 

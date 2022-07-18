@@ -141,7 +141,7 @@ impl<'a> FrameHandler<'a> {
                     });
                 }
 
-                println!("      Emitting tube...");
+                log::trace!("Emitting tube...");
                 let tube = tube::Tube::new(
                     self.peer_type,
                     tube_id,

@@ -32,8 +32,7 @@ impl Server {
         tokio::spawn(async move {
             if let Err(e) = hyper_server.await {
                 let mut server_ctx = server_ctx.lock().unwrap();
-                let error_msg = format!("Server error: {}", e);
-                eprintln!("{}", error_msg);
+                log::error!("Http server error: {}", e);
                 server_ctx.pending_events.push_back(Err(ServerError::Err(format!("{:?}", e))));
                 // TODO: Need to iterate all tubes and error them here as well.
                 if let Some(waker) = server_ctx.waker.take() {

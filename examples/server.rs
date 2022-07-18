@@ -1,5 +1,7 @@
 use futures::StreamExt;
 
+use simple_logger::SimpleLogger;
+
 use tubez::server::ChannelEvent;
 use tubez::server::ServerEvent;
 use tubez::tube::Tube;
@@ -42,6 +44,10 @@ fn spawn_channel_handler(mut channel: tubez::server::Channel) {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() {
+    SimpleLogger::new()
+      .init()
+      .expect("Error initializing logger");
+
     let addr = std::net::SocketAddr::from(([127,0,0,1], 3000));
     println!("Starting server...");
     let mut server = tubez::Server::new(&addr).await;

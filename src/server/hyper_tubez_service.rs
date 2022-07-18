@@ -46,7 +46,7 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
         let mut body_sender = Arc::new(tokio::sync::Mutex::new(body_sender));
         let res = hyper::Response::new(body);
 
-        println!("Http request received! Headers: {:?}", req.headers());
+        log::trace!("Http request received. Headers: {:?}", req.headers());
 
         let channel_ctx = self.channel_ctx.clone();
         let server_ctx = self.server_ctx.clone();
@@ -63,7 +63,7 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
                 let raw_data = match data_result {
                     Ok(data) => data,
                     Err(e) => {
-                        println!("  stream of data from client has errored: `{:?}`", e);
+                        log::error!("Stream of data from client has errored: `{:?}`", e);
                         break;
                     },
                 };
@@ -76,13 +76,13 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
                         // 
                         //       For now just log and ignore to avoid some kind of hand-wavy 
                         //       DDOS situation
-                        println!("frame decode error: {:?}", e);
+                        log::error!("frame decode error: {:?}", e);
                         return;
                     },
                 };
 
                 while let Some(frame) = new_frames.pop_front() {
-                    println!("hyperreqhandler: Frame: {:?}", frame);
+                    log::trace!("New frame received: {:?}", frame);
                     match frame_handler.handle_frame(frame, &mut body_sender).await {
                         Ok(frame::FrameHandlerResult::NewTube(mut tube)) => {
                             if let Some(channel_ctx) = Weak::upgrade(&channel_ctx) {
@@ -94,22 +94,22 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
                                     waker.wake();
                                 }
                             } else {
-                                eprintln!("hyperreqhandler:  Received a new Tube from the client on a channel that has been dropped!");
+                                log::error!("Received a new Tube from the client on a channel that has been dropped!");
                                 match tube.abort_internal(
                                     frame::AbortReason::ApplicationError
                                 ).await {
                                     Ok(()) => (),
                                     Err(e) => 
-                                        eprintln!("hyperreqhandler:    Error aborting tube: `{:?}`", e),
+                                        log::error!("Error aborting tube: `{:?}`", e),
                                 }
                             }
                         },
                         Ok(frame::FrameHandlerResult::FullyHandled) => (),
-                        Err(e) => eprintln!("hyperreqhandler:  Error handling frame: {:?}", e),
+                        Err(e) => log::error!("Error handling frame: {:?}", e),
                     }
                 }
             }
-            println!("Stream of httprequest data from client has ended!");
+            log::trace!("Stream of httprequest data from client has ended.");
         });
 
         future::ok(res)
