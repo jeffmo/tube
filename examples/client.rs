@@ -43,49 +43,29 @@ async fn main() {
     let mut client = tubez::Client::new(cli_args.server_uri);
     println!("Creating channel...");
     let channel_headers = HashMap::new();
-    let mut channel = match client.make_tube_channel(channel_headers).await {
-        Ok(channel) => channel,
-        Err(e) => {
-            println!("channel creation error: {:?}", e);
-            return
-        },
-    };
+    let mut channel = client.make_tube_channel(channel_headers).await.expect(
+        "Channel creation error"
+    );
     println!("Channel created!");
 
-    println!("Waiting 5secs");
-    tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
+    println!("Waiting 3secs");
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
     println!("Creating tube1...");
     let tube1_headers = HashMap::new();
-    let mut tube1 = match channel.make_tube(tube1_headers).await {
-        Ok(tube) => tube,
-        Err(e) => {
-            println!("Error creating tube: {:?}", e);
-            return
-        },
-    };
+    let mut tube1 = channel.make_tube(tube1_headers).await.expect(
+      "Tube1 creation error"
+    );
     println!("tube1 created!");
 
-    /*
-    println!("Creating tube2...");
-    let tube2_headers = HashMap::new();
-    let mut tube2 = match channel.make_tube(tube2_headers).await {
-        Ok(tube) => tube,
-        Err(e) => {
-            println!("Error creating tube: {:?}", e);
-            return
-        },
-    };
-    println!("tube2 created!");
-    */
-    println!("Waiting 5secs");
-    tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
+    println!("Waiting 3secs");
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
     println!("Sending some data...");
     tube1.send("tube1 data!".into(), Duration::from_secs(3)).await.unwrap();
     println!("received ack for data sent on tube1!");
     println!("client has finished...");
-    tube1.has_finished_sending().await.expect("tube1 failed sending ClientHasFinished");
+    tube1.has_finished_sending().await.expect("Tube1 failed sending ClientHasFinished");
 
     println!("Waiting 3 secs before creating 2nd tube...");
     // TODO: Deleting this kills the transport... Probably need to gracefully 
@@ -93,13 +73,9 @@ async fn main() {
     tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
 
     let tube2_headers = HashMap::new();
-    let tube2 = match channel.make_tube(tube2_headers).await {
-        Ok(tube) => tube,
-        Err(e) => {
-            println!("Error creating tube: {:?}", e);
-            return
-        },
-    };
+    let tube2 = channel.make_tube(tube2_headers).await.expect(
+        "Tube2 creation error"
+    );
 
     println!("Waiting on tube events...");
     while let Some(tube_event) = tube1.next().await {
