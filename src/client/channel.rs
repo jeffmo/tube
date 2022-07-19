@@ -155,3 +155,8 @@ impl Channel {
         new_id
     }
 }
+
+#[cfg(test)]
+mod channel_tests {
+    // TODO
+}

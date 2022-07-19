@@ -76,3 +76,8 @@ impl futures::stream::Stream for Server {
         }
     }
 }
+
+#[cfg(test)]
+mod server_tests {
+    // TODO
+}
