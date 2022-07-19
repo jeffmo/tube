@@ -1,9 +1,15 @@
 use std::collections::HashMap;
 
+use simple_logger::SimpleLogger;
+
 use futures::StreamExt;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() {
+    SimpleLogger::new()
+      .init()
+      .expect("Error initializing logger");
+
     println!("Creating client...");
     let mut client = tubez::Client::new();
     println!("Creating channel...");

@@ -84,12 +84,7 @@ impl Channel {
                 let mut new_frames = match frame_decoder.decode(raw_data.to_vec()) {
                     Ok(frames) => frames,
                     Err(e) => {
-                        // TODO: What happens if we get weird data from the server? Should we 
-                        //       log and dump it? Trash the request (sec implications of that?)?
-                        // 
-                        //       For now just log and ignore to avoid some kind of hand-wavy 
-                        //       DDOS situation
-                        log::error!("frame decode error: {:?}", e);
+                        log::error!("Frame decode error: {:?}", e);
                         return;
                     },
                 };
@@ -99,6 +94,10 @@ impl Channel {
                     match frame_handler.handle_frame(frame, &mut body_sender).await {
                         Ok(frame::FrameHandlerResult::NewTube(tube)) => {
                             // TODO: Server-initiated tubes aren't supported yet.
+                            log::error!(
+                                "Received a NewTube frame from the server, but \
+                                 server-initiated tubes aren't supported yet!"
+                            );
                         },
                         Ok(frame::FrameHandlerResult::FullyHandled) => (),
                         Err(e) => log::error!("Error handling frame: {:?}", e),

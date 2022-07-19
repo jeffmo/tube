@@ -332,7 +332,11 @@ impl Drop for Tube {
 
         use PeerType::*;
         use TubeCompletionState::*;
-        log::trace!("tube::Drop: Checking completion_state={:?} before dropping...", &completion_state);
+        log::trace!(
+            "Checking completion_state={:?} before dropping Tube(id={})...", 
+            &completion_state, 
+            self.tube_id,
+        );
         match (self.peer_type, &completion_state) {
             (_, &AbortedFromLocal(_) | &AbortedFromRemote(_) | &Closed) => (),
 
@@ -353,7 +357,14 @@ impl Drop for Tube {
                             PeerType::Client => "server",
                             PeerType::Server => "client"
                         };
-                        log::error!("Attempted to communicate to the {:?} that Tube has finished sending when dropping the Tube object, but failed: {:?}", remote_peer_str, e)
+                        log::error!(
+                            "Attempted to communicate to the {:?} that \
+                             Tube(id={}) has finished sending when dropping \
+                             the Tube object, but failed: {:?}", 
+                            remote_peer_str, 
+                            tube_id, 
+                            e
+                        )
                     }
                 });
             },
@@ -361,7 +372,9 @@ impl Drop for Tube {
             (Client, &ClientHasFinishedSending) |
             (Server, &ServerHasFinishedSending) |
             (_, &Open) => {
-                log::error!("Dropping tube(id={}) before {} has finished sending! Sending abort to {}",
+                log::error!(
+                    "Dropping Tube(id={}) before {} has finished sending! \
+                     Sending abort to {}",
                     self.tube_id,
                     remote_peer_str,
                     remote_peer_str,
@@ -377,7 +390,13 @@ impl Drop for Tube {
                         &tube_manager,
                         &sender,
                     ).await {
-                        log::error!("Attempted to send an Abort to the {}, but failed: {:?}", remote_peer_str, e)
+                        log::error!(
+                            "Attempted to send an Abort for Tube(id={}) \
+                             to the {}, but failed: {:?}", 
+                            remote_peer_str,
+                            tube_id, 
+                            e
+                        )
                     }
                 });
             },

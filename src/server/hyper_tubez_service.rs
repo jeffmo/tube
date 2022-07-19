@@ -46,6 +46,7 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
         let mut body_sender = Arc::new(tokio::sync::Mutex::new(body_sender));
         let res = hyper::Response::new(body);
 
+        // TODO: Sanitize these headers (e.g. blank out auth, app-headers, etc)
         log::trace!("Http request received. Headers: {:?}", req.headers());
 
         let channel_ctx = self.channel_ctx.clone();
@@ -63,7 +64,10 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
                 let raw_data = match data_result {
                     Ok(data) => data,
                     Err(e) => {
-                        log::error!("Stream of data from client has errored: `{:?}`", e);
+                        log::error!(
+                            "Stream of data from client has errored: `{:?}`", 
+                            e,
+                        );
                         break;
                     },
                 };
@@ -76,7 +80,7 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
                         // 
                         //       For now just log and ignore to avoid some kind of hand-wavy 
                         //       DDOS situation
-                        log::error!("frame decode error: {:?}", e);
+                        log::error!("Frame decode error: {:?}", e);
                         return;
                     },
                 };
@@ -94,13 +98,20 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
                                     waker.wake();
                                 }
                             } else {
-                                log::error!("Received a new Tube from the client on a channel that has been dropped!");
+                                log::error!(
+                                    "Received a new Tube(id={}) from the \
+                                     client on a channel that has been \
+                                     dropped!",
+                                     tube.get_id(),
+                                );
                                 match tube.abort_internal(
                                     frame::AbortReason::ApplicationError
                                 ).await {
                                     Ok(()) => (),
-                                    Err(e) => 
-                                        log::error!("Error aborting tube: `{:?}`", e),
+                                    Err(e) => log::error!(
+                                        "Error aborting tube: `{:?}`", 
+                                        e,
+                                    ),
                                 }
                             }
                         },
