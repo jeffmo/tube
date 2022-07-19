@@ -1,11 +1,18 @@
 use futures::StreamExt;
 
+use clap::Parser;
 use simple_logger::SimpleLogger;
 
 use tubez::server::ChannelEvent;
 use tubez::server::ServerEvent;
 use tubez::tube::Tube;
 use tubez::tube::TubeEvent;
+
+#[derive(Parser)]
+struct CLIArgs {
+    #[clap(value_parser)]
+    bind_addr: std::net::SocketAddr,
+}
 
 fn spawn_tube_handler(mut tube: Tube) {
   tokio::spawn(async move {
@@ -48,9 +55,10 @@ async fn main() {
       .init()
       .expect("Error initializing logger");
 
-    let addr = std::net::SocketAddr::from(([127,0,0,1], 3000));
-    println!("Starting server...");
-    let mut server = tubez::Server::new(&addr).await;
+    let cli_args = CLIArgs::parse();
+
+    println!("Starting server bound to `{}`...", &cli_args.bind_addr);
+    let mut server = tubez::Server::new(&cli_args.bind_addr).await;
     println!("Server started.\n");
 
     println!("Waiting on Tubes...");

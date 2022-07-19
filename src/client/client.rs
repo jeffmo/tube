@@ -11,9 +11,10 @@ pub enum ServerMakeTubeError {
 pub struct Client {
   hyper_client: hyper::Client<hyper::client::HttpConnector>,
   implicit_channel: Option<channel::Channel>,
+  server_uri: hyper::Uri,
 }
 impl Client {
-  pub fn new() -> Self {
+  pub fn new(server_uri: hyper::Uri) -> Self {
     let hyper_client: hyper::Client<hyper::client::HttpConnector> = 
       hyper::Client::builder()
         .http2_only(true)
@@ -22,6 +23,7 @@ impl Client {
     Client {
       hyper_client,
       implicit_channel: None,
+      server_uri,
     }
   }
 
@@ -29,7 +31,7 @@ impl Client {
     &mut self,
     headers: HashMap<String, String>,
   ) -> Result<channel::Channel, channel::ChannelConnectError> {
-    channel::Channel::new(&self.hyper_client, headers).await
+    channel::Channel::new(&self.hyper_client, headers, &self.server_uri).await
   }
 
   pub async fn new_tube(

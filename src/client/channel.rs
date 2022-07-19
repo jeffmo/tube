@@ -29,16 +29,17 @@ impl Channel {
     pub(in crate::client) async fn new(
         hyper_client: &hyper::Client<hyper::client::HttpConnector>,
         _headers: HashMap<String, String>, // TODO
+        server_uri: &hyper::Uri,
     ) -> Result<Self, ChannelConnectError> {
         let (body_sender, req_body) = hyper::Body::channel();
         let body_sender = Arc::new(tokio::sync::Mutex::new(body_sender));
         let req = hyper::Request::builder()
           .method(hyper::Method::POST)
-          .uri("http://127.0.0.1:3000/")
+          .uri(format!("{}", &server_uri))
           .body(req_body)
           .unwrap();
 
-        log::trace!("Sending channel request...");
+        log::trace!("Sending channel request to {}...", &server_uri);
         let response = match hyper_client.request(req).await {
             Ok(response) => response,
             Err(e) => return Err(ChannelConnectError::InitError(e)),

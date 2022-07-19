@@ -1,9 +1,35 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use clap::Parser;
 use simple_logger::SimpleLogger;
 
 use futures::StreamExt;
+
+fn uri_cli_parser(s: &str) -> Result<hyper::Uri, String> {
+    let uri: hyper::Uri = match s.parse() {
+        Ok(uri) => uri,
+        Err(e) => return Err(format!("Error parsing URI: {:?}", e)),
+    };
+
+    let mut uri_parts = uri.into_parts();
+    if let None = uri_parts.scheme {
+        uri_parts.scheme = Some(hyper::http::uri::Scheme::HTTPS);
+    }
+    if let None = uri_parts.path_and_query {
+        uri_parts.path_and_query = 
+          Some(hyper::http::uri::PathAndQuery::from_static("/"));
+    }
+
+    let uri = hyper::Uri::from_parts(uri_parts).unwrap();
+    Ok(uri.into())
+}
+
+#[derive(Parser)]
+struct CLIArgs {
+    #[clap(value_parser = uri_cli_parser)]
+    server_uri: hyper::Uri,
+}
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() {
@@ -11,8 +37,10 @@ async fn main() {
       .init()
       .expect("Error initializing logger");
 
+    let cli_args = CLIArgs::parse();
+
     println!("Creating client...");
-    let mut client = tubez::Client::new();
+    let mut client = tubez::Client::new(cli_args.server_uri);
     println!("Creating channel...");
     let channel_headers = HashMap::new();
     let mut channel = match client.make_tube_channel(channel_headers).await {
