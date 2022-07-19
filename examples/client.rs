@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use simple_logger::SimpleLogger;
 
@@ -53,7 +54,7 @@ async fn main() {
     tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
 
     println!("Sending some data...");
-    tube1.send("tube1 data!".into()).await.unwrap();
+    tube1.send("tube1 data!".into(), Duration::from_secs(3)).await.unwrap();
     println!("received ack for data sent on tube1!");
     println!("client has finished...");
     tube1.has_finished_sending().await.expect("tube1 failed sending ClientHasFinished");

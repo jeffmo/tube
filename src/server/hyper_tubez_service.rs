@@ -1,4 +1,4 @@
-use futures_util::future;
+use futures::future;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;

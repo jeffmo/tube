@@ -2,6 +2,7 @@ use futures;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use crate::common::frame;
 use crate::common::InvertedFuture;
@@ -33,6 +34,7 @@ pub enum HasFinishedSendingError {
 pub enum SendError {
     AckIdAlreadyInUseInternalError,
     FrameEncodeError(frame::FrameEncodeError),
+    TimedOutWaitingOnAck(Duration),
     TransportError(hyper::Error),
     UnknownTransportError,
 }
@@ -198,7 +200,11 @@ impl Tube {
         }
     }
 
-    pub async fn send(&mut self, data: Vec<u8>) -> Result<(), SendError> {
+    pub async fn send(
+        &mut self, 
+        data: Vec<u8>,
+        ack_timeout: Duration,
+    ) -> Result<(), SendError> {
         let ack_id = self.take_ackid();
         match frame::encode_payload_frame(self.tube_id, Some(ack_id), data) {
             Ok(frame_data) => {
@@ -224,8 +230,11 @@ impl Tube {
                     }
                 };
 
-                // TODO: Await this, but with some kind of a timeout...
-                sendack_future.await;
+                let sendack_future_with_timeout = 
+                    tokio::time::timeout(ack_timeout, sendack_future);
+                if let Err(_) = sendack_future_with_timeout.await {
+                    return Err(SendError::TimedOutWaitingOnAck(ack_timeout));
+                }
 
                 {
                     let mut tube_mgr = self.tube_manager.lock().unwrap();
