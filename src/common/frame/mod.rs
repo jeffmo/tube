@@ -3,9 +3,11 @@ mod encoder;
 mod frame;
 mod frame_handler;
 
+// TODO: Are all these "(in crate)" specs really necessary? Feels excessive...
 pub(in crate) use decoder::Decoder;
 pub(in crate) use encoder::*;
 pub(in crate) use frame::AbortReason;
+pub(in crate) use frame::Frame;
 pub(in crate) use frame_handler::FrameHandler;
 pub(in crate) use frame_handler::FrameHandlerResult;
 
@@ -13,8 +15,8 @@ pub(in crate) use frame_handler::FrameHandlerResult;
 mod codec_tests {
     use std::collections::HashMap;
 
-    use super::Frame;
-    use super::Decoder;
+    use super::frame::Frame;
+    use super::decoder::Decoder;
     use super::encoder::*;
 
     #[test]
