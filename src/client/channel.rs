@@ -4,9 +4,11 @@ use std::sync::Mutex;
 
 use hyper::body::HttpBody;
 
-use crate::common::PeerType;
 use crate::common::frame;
+use crate::common::PeerType;
 use crate::common::tube;
+use crate::common::UniqueIdError;
+use crate::common::UniqueIdManager;
 
 #[derive(Debug)]
 pub enum ChannelConnectError {
@@ -17,12 +19,13 @@ pub enum ChannelConnectError {
 pub enum MakeTubeError {
     FrameEncodeError(frame::FrameEncodeError),
     InternalErrorDuplicateTubeId(u16),
+    TubeIdsExhausted,
     UnknownTransportError,
 }
 
 pub struct Channel {
     body_sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>,
-    tube_id_counter: u16,
+    tube_id_manager: UniqueIdManager,
     tube_managers: Arc<Mutex<HashMap<u16, Arc<Mutex<tube::TubeManager>>>>>,
 }
 impl Channel {
@@ -93,7 +96,7 @@ impl Channel {
                 while let Some(frame) = new_frames.pop_front() {
                     log::trace!("Processing frame: {:?}", frame);
                     match frame_handler.handle_frame(frame, &mut body_sender).await {
-                        Ok(frame::FrameHandlerResult::NewTube(tube)) => {
+                        Ok(frame::FrameHandlerResult::NewTube(_tube)) => {
                             // TODO: Server-initiated tubes aren't supported yet.
                             log::error!(
                                 "Received a NewTube frame from the server, but \
@@ -109,7 +112,7 @@ impl Channel {
 
         Ok(Channel {
             body_sender: body_sender,
-            tube_id_counter: 0,
+            tube_id_manager: UniqueIdManager::new_with_odd_ids(),
             tube_managers,
         })
     }
@@ -118,8 +121,12 @@ impl Channel {
         &mut self, 
         headers: HashMap<String, String>,
     ) -> Result<tube::Tube, MakeTubeError> {
-        let tube_id = self.new_tube_id();
-        let estab_tube_frame = match frame::encode_newtube_frame(tube_id, headers) {
+        let tube_id = match self.tube_id_manager.take_id() {
+          Ok(id) => id,
+          Err(UniqueIdError::NoIdsAvailable) => 
+            return Err(MakeTubeError::TubeIdsExhausted),
+        };
+        let estab_tube_frame = match frame::encode_newtube_frame(tube_id.val(), headers) {
             Ok(data) => data,
             Err(e) => return Err(MakeTubeError::FrameEncodeError(e)),
         };
@@ -137,6 +144,7 @@ impl Channel {
         //       before creating a Tube and returning it.
 
         let tube_mgr = Arc::new(Mutex::new(tube::TubeManager::new()));
+        let tube_id_val = tube_id.val();
         let tube = tube::Tube::new(
             PeerType::Client, 
             tube_id, 
@@ -144,16 +152,10 @@ impl Channel {
             tube_mgr.clone(),
         );
         let mut tube_managers = self.tube_managers.lock().unwrap();
-        match tube_managers.try_insert(tube_id, tube_mgr) {
+        match tube_managers.try_insert(tube_id_val, tube_mgr) {
             Ok(_) => Ok(tube),
-            Err(_) => Err(MakeTubeError::InternalErrorDuplicateTubeId(tube_id)),
+            Err(_) => Err(MakeTubeError::InternalErrorDuplicateTubeId(tube_id_val)),
         }
-    }
-
-    fn new_tube_id(&mut self) -> u16 {
-        let new_id = self.tube_id_counter;
-        self.tube_id_counter += 2;
-        new_id
     }
 }
 

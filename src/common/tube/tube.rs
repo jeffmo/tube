@@ -1,5 +1,4 @@
 use futures;
-use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -7,6 +6,7 @@ use std::time::Duration;
 use crate::common::frame;
 use crate::common::InvertedFuture;
 use crate::common::PeerType;
+use crate::common::UniqueId;
 use crate::common::UniqueIdError;
 use crate::common::UniqueIdManager;
 use super::tube_event;
@@ -74,8 +74,16 @@ async fn send_abort(
     let mut sender = sender.lock().await;
     match sender.send_data(frame_data.into()).await {
         Ok(_) => Ok(()),
+        // TODO: Should this just be a panic? If we get into this state we don't
+        //       really know if the client and server are synchronized on the 
+        //       state of this Tube...havoc?
         Err(e) => Err(AbortError::TransportError(e)),
     }
+
+    // TODO: !!! Need to somehow remove this tube from the channel's map of 
+    //           TubeManagers! As-is, we only remove from that map if we recieve and Abort or a
+    //           closing HasFinishedSending from the peer...but not if we initiate full closure
+    //           from the local Tube object!!
 }
 
 async fn send_has_finished_sending(
@@ -122,16 +130,13 @@ async fn send_has_finished_sending(
     //       hyper issue doesn't block the tube_mgr Mutex forever or something
     let transport_error = {
         let mut sender = sender.lock().await;
-        match sender.send_data(frame_data.into()).await {
-            Ok(_) => None,
-            Err(e) => Some(e),
-        }
+        sender.send_data(frame_data.into()).await
     };
 
     // If the transmit failed, we can't be certain if the HasFinishedSending was
     // actually received by the peer...so [try to] abort the Tube before 
     // returning a transport error.
-    if let Some(e) = transport_error {
+    if let Err(e) = transport_error {
         let _ = send_abort(
             tube_id, 
             frame::AbortReason::TransportErrorWhileSynchronizingTubeState,
@@ -145,6 +150,12 @@ async fn send_has_finished_sending(
         return Err(HasFinishedSendingError::FatalTransportError(e));
     }
 
+    // TODO: !!! Need to somehow remove this tube from the channel's map of 
+    //           TubeManagers if it is now fully Closed! As-is, we only remove 
+    //           from that map if we recieve and Abort or a closing 
+    //           HasFinishedSending from the peer...but not if we initiate full
+    //           closure from the local Tube object!!
+
     Ok(())
 }
 
@@ -152,7 +163,7 @@ async fn send_has_finished_sending(
 pub struct Tube {
     ackid_manager: UniqueIdManager,
     sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>,
-    tube_id: u16,
+    tube_id: UniqueId,
     tube_manager: Arc<Mutex<TubeManager>>,
     peer_type: PeerType,
 }
@@ -166,7 +177,7 @@ impl Tube {
         reason: frame::AbortReason,
     ) -> Result<(), AbortError> {
         send_abort(
-            self.tube_id, 
+            self.tube_id.val(), 
             reason, 
             &self.tube_manager,
             &self.sender,
@@ -174,13 +185,13 @@ impl Tube {
     }
 
     pub fn get_id(&self) -> u16 {
-        return self.tube_id;
+        return self.tube_id.val();
     }
 
     pub async fn has_finished_sending(&self) -> Result<(), HasFinishedSendingError> {
         send_has_finished_sending(
             self.peer_type,
-            self.tube_id,
+            self.tube_id.val(),
             &self.tube_manager,
             &self.sender,
         ).await
@@ -188,7 +199,7 @@ impl Tube {
 
     pub(in crate) fn new(
         peer_type: PeerType,
-        tube_id: u16,
+        tube_id: UniqueId,
         sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>, 
         tube_manager: Arc<Mutex<TubeManager>>,
     ) -> Self {
@@ -212,7 +223,7 @@ impl Tube {
         };
 
         let frame_data = match frame::encode_payload_frame(
-            self.tube_id, 
+            self.tube_id.val(), 
             Some(ack_id.val()), 
             data,
         ) {
@@ -255,7 +266,7 @@ impl Tube {
     }
 
     pub async fn send_and_forget(&mut self, data: Vec<u8>) -> Result<(), SendError> {
-        match frame::encode_payload_frame(self.tube_id, None, data) {
+        match frame::encode_payload_frame(self.tube_id.val(), None, data) {
             Ok(frame_data) => {
                 let mut sender = self.sender.lock().await;
                 if let Err(e) = sender.send_data(frame_data.into()).await {
@@ -325,12 +336,6 @@ impl Drop for Tube {
             PeerType::Server => "client"
         };
 
-        let peer_not_finished_str = format!(
-            "Dropping tube(id={}) before {} has finished sending!",
-            self.tube_id,
-            remote_peer_str,
-        );
-
         use PeerType::*;
         use TubeCompletionState::*;
         log::trace!(
@@ -344,20 +349,16 @@ impl Drop for Tube {
             (Client, &ServerHasFinishedSending) |
             (Server, &ClientHasFinishedSending) => {
                 let peer_type = self.peer_type;
-                let tube_id = self.tube_id;
+                let tube_id = self.tube_id.take();
                 let tube_manager = self.tube_manager.clone();
                 let sender = self.sender.clone();
                 tokio::spawn(async move {
                     if let Err(e) = send_has_finished_sending(
                         peer_type,
-                        tube_id,
+                        tube_id.val(),
                         &tube_manager,
                         &sender,
                     ).await {
-                        let remote_peer = match peer_type {
-                            PeerType::Client => "server",
-                            PeerType::Server => "client"
-                        };
                         log::error!(
                             "Attempted to communicate to the {:?} that \
                              Tube(id={}) has finished sending when dropping \
@@ -381,16 +382,20 @@ impl Drop for Tube {
                     remote_peer_str,
                 );
 
-                let tube_id = self.tube_id;
+                let tube_id = self.tube_id.take();
                 let tube_manager = self.tube_manager.clone();
                 let sender = self.sender.clone();
                 tokio::spawn(async move {
                     if let Err(e) = send_abort(
-                        tube_id, 
+                        tube_id.val(), 
                         frame::AbortReason::ApplicationError,
                         &tube_manager,
                         &sender,
                     ).await {
+                        // TODO: Should this just be a panic? If we get into 
+                        //       this state we don't really know if the client 
+                        //       and server are synchronized on the state of 
+                        //       this Tube...havoc?
                         log::error!(
                             "Attempted to send an Abort for Tube(id={}) \
                              to the {}, but failed: {:?}", 
@@ -417,8 +422,6 @@ impl Tube {
 
 #[cfg(test)]
 mod tube_tests {
-    use std::assert_matches::assert_matches;
-
     use super::*;
 
     use crate::common::InvertedFuture;
@@ -432,7 +435,8 @@ mod tube_tests {
     fn make_test_tube() -> (Tube, TestTubeStuff) {
         let (body_sender, req_body) = hyper::Body::channel();
         let body_sender = Arc::new(tokio::sync::Mutex::new(body_sender));
-        let tube_id = 1;
+        let mut id_manager = UniqueIdManager::new();
+        let tube_id = id_manager.take_id().unwrap();
         let tube_manager = Arc::new(Mutex::new(TubeManager::new()));
         let tube = Tube::new(
             PeerType::Client,

@@ -50,7 +50,6 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
         log::trace!("Http request received. Headers: {:?}", req.headers());
 
         let channel_ctx = self.channel_ctx.clone();
-        let server_ctx = self.server_ctx.clone();
         let mut body = req.into_body();
         tokio::spawn(async move {
             let mut frame_decoder = frame::Decoder::new();

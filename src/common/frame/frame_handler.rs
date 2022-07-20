@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use crate::common::PeerType;
 use crate::common::tube;
 use crate::common::tube::TubeCompletionState;
+use crate::common::UniqueId;
 use super::encoder;
 use super::frame;
 
@@ -142,6 +143,7 @@ impl<'a> FrameHandler<'a> {
                 }
 
                 log::trace!("Emitting tube...");
+                let tube_id = UniqueId::new(tube_id, None);
                 let tube = tube::Tube::new(
                     self.peer_type,
                     tube_id,
