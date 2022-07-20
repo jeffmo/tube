@@ -1,3 +1,4 @@
+#![feature(assert_matches)]
 #![feature(map_try_insert)]
 
 mod common;

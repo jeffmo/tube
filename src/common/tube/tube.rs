@@ -7,6 +7,8 @@ use std::time::Duration;
 use crate::common::frame;
 use crate::common::InvertedFuture;
 use crate::common::PeerType;
+use crate::common::UniqueIdError;
+use crate::common::UniqueIdManager;
 use super::tube_event;
 use super::tube_event::TubeEvent;
 use super::tube_event::TubeEvent_StreamError;
@@ -33,6 +35,7 @@ pub enum HasFinishedSendingError {
 #[derive(Debug)]
 pub enum SendError {
     AckIdAlreadyInUseInternalError,
+    AckIdsExhausted,
     FrameEncodeError(frame::FrameEncodeError),
     TimedOutWaitingOnAck(Duration),
     TransportError(hyper::Error),
@@ -147,8 +150,7 @@ async fn send_has_finished_sending(
 
 #[derive(Debug)]
 pub struct Tube {
-    available_ackids: VecDeque<u16>,
-    ack_id_counter: u16,
+    ackid_manager: UniqueIdManager,
     sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>,
     tube_id: u16,
     tube_manager: Arc<Mutex<TubeManager>>,
@@ -191,8 +193,7 @@ impl Tube {
         tube_manager: Arc<Mutex<TubeManager>>,
     ) -> Self {
         Tube {
-            ack_id_counter: 0,
-            available_ackids: VecDeque::new(),
+            ackid_manager: UniqueIdManager::new(),
             sender,
             tube_id,
             tube_manager,
@@ -205,73 +206,64 @@ impl Tube {
         data: Vec<u8>,
         ack_timeout: Duration,
     ) -> Result<(), SendError> {
-        let ack_id = self.take_ackid();
-        match frame::encode_payload_frame(self.tube_id, Some(ack_id), data) {
-            Ok(frame_data) => {
-                let (sendack_future, sendack_resolver) = InvertedFuture::<()>::new();
-                {
-                    let mut tube_mgr = self.tube_manager.lock().unwrap();
-                    if let Err(_) = tube_mgr.sendacks.try_insert(ack_id, sendack_resolver) {
-                        return Err(SendError::AckIdAlreadyInUseInternalError)
-                    }
-                }
+        let ack_id = match self.ackid_manager.take_id() {
+            Ok(ack_id) => ack_id,
+            Err(UniqueIdError::NoIdsAvailable) => return Err(SendError::AckIdsExhausted),
+        };
 
-                {
-                    let mut sender = self.sender.lock().await;
-                    match sender.send_data(frame_data.into()).await {
-                        Ok(_) => (),
-                        Err(e) => {
-                            {
-                                let mut tube_mgr = self.tube_manager.lock().unwrap();
-                                tube_mgr.sendacks.remove(&ack_id);
-                            }
-                            return Err(SendError::TransportError(e))
-                        },
-                    }
-                };
+        let frame_data = match frame::encode_payload_frame(
+            self.tube_id, 
+            Some(ack_id.val()), 
+            data,
+        ) {
+            Ok(frame_data) => frame_data,
+            Err(e) => return Err(SendError::FrameEncodeError(e)),
+        };
 
-                let sendack_future_with_timeout = 
-                    tokio::time::timeout(ack_timeout, sendack_future);
-                if let Err(_) = sendack_future_with_timeout.await {
-                    return Err(SendError::TimedOutWaitingOnAck(ack_timeout));
-                }
-
-                {
-                    let mut tube_mgr = self.tube_manager.lock().unwrap();
-                    tube_mgr.sendacks.remove(&ack_id);
-                }
-
-                Ok(())
-            },
-            Err(e) => Err(SendError::FrameEncodeError(e)),
+        let (sendack_future, sendack_resolver) = InvertedFuture::<()>::new();
+        {
+            let mut tube_mgr = self.tube_manager.lock().unwrap();
+            if let Err(_) = tube_mgr.sendacks.try_insert(ack_id.val(), sendack_resolver) {
+                return Err(SendError::AckIdAlreadyInUseInternalError)
+            }
         }
+
+        {
+            let mut sender = self.sender.lock().await;
+            if let Err(e) = sender.send_data(frame_data.into()).await {
+                let mut tube_mgr = self.tube_manager.lock().unwrap();
+                tube_mgr.sendacks.remove(&ack_id.val());
+                return Err(SendError::TransportError(e))
+            }
+        };
+
+        let sendack_future_with_timeout = 
+            tokio::time::timeout(ack_timeout, sendack_future);
+        let sendack_future_result = sendack_future_with_timeout.await;
+
+        {
+            let mut tube_mgr = self.tube_manager.lock().unwrap();
+            tube_mgr.sendacks.remove(&ack_id.val());
+        }
+
+        if let Err(_) = sendack_future_result {
+            return Err(SendError::TimedOutWaitingOnAck(ack_timeout));
+        }
+
+        Ok(())
+
     }
 
     pub async fn send_and_forget(&mut self, data: Vec<u8>) -> Result<(), SendError> {
         match frame::encode_payload_frame(self.tube_id, None, data) {
             Ok(frame_data) => {
                 let mut sender = self.sender.lock().await;
-                match sender.send_data(frame_data.into()).await {
-                    Ok(_) => Ok(()),
-                    Err(e) => Err(SendError::TransportError(e)),
+                if let Err(e) = sender.send_data(frame_data.into()).await {
+                    return Err(SendError::TransportError(e));
                 }
+                Ok(())
             },
             Err(e) => Err(SendError::FrameEncodeError(e)),
-        }
-    }
-
-    fn take_ackid(&mut self) -> u16 {
-        match self.available_ackids.pop_front() {
-            Some(ack_id) => ack_id,
-            None => {
-                let ack_id = self.ack_id_counter;
-                if ack_id == u16::MAX {
-                    self.ack_id_counter = 0;
-                } else {
-                    self.ack_id_counter += 1;
-                }
-                ack_id
-            }
         }
     }
 }
@@ -415,15 +407,93 @@ impl Drop for Tube {
 
 #[cfg(test)]
 impl Tube {
+    /*
     pub fn set_test_events(&mut self, events: Vec<TubeEvent>) {
         let mut tube_mgr = self.tube_manager.lock().unwrap();
         tube_mgr.pending_events = VecDeque::from(events);
     }
+    */
 }
 
-/*
 #[cfg(test)]
 mod tube_tests {
+    use std::assert_matches::assert_matches;
+
+    use super::*;
+
+    use crate::common::InvertedFuture;
+    use crate::tube;
+
+    struct TestTubeStuff {
+        req_body: hyper::body::Body,
+        tube_manager: Arc<Mutex<TubeManager>>,
+    }
+
+    fn make_test_tube() -> (Tube, TestTubeStuff) {
+        let (body_sender, req_body) = hyper::Body::channel();
+        let body_sender = Arc::new(tokio::sync::Mutex::new(body_sender));
+        let tube_id = 1;
+        let tube_manager = Arc::new(Mutex::new(TubeManager::new()));
+        let tube = Tube::new(
+            PeerType::Client,
+            tube_id,
+            body_sender,
+            tube_manager.clone(),
+        );
+
+        (tube, TestTubeStuff {
+            req_body,
+            tube_manager,
+        })
+    }
+
+    #[tokio::test]
+    async fn send_errors_if_ackid_already_in_use() {
+        let (mut tube, tube_stuff) = make_test_tube();
+
+        // Add a sendack(id=0) to the TubeManager
+        let (_fut, res) = InvertedFuture::<()>::new();
+        {
+            let mut tube_mgr = tube_stuff.tube_manager.lock().unwrap();
+            tube_mgr.sendacks.insert(0, res);
+        }
+
+        match tube.send("test data".into(), Duration::from_millis(100)).await {
+            Err(tube::SendError::AckIdAlreadyInUseInternalError) => {
+                let tube_mgr = tube_stuff.tube_manager.lock().unwrap();
+                assert_eq!(tube_mgr.sendacks.len(), 1);
+                assert!(tube_mgr.sendacks.contains_key(&0));
+            },
+
+            unexpected => assert!(
+                false, 
+                "Unexpected result from Tube::Send(): {:?}", 
+                unexpected,
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn send_errors_if_ack_not_received_in_time() {
+        let (mut tube, tube_stuff) = make_test_tube();
+        let timeout = Duration::from_nanos(1);
+        match tube.send("test data".into(), timeout.clone()).await {
+            Err(tube::SendError::TimedOutWaitingOnAck(err_timeout)) => {
+                assert_eq!(err_timeout, timeout);
+
+                // There should be no SendAck entry left polluting the TubeManager
+                let tube_mgr = tube_stuff.tube_manager.lock().unwrap();
+                assert_eq!(tube_mgr.sendacks.len(), 0);
+            },
+
+            unexpected => assert!(
+                false,
+                "Unexpected result from Tube::send(): {:?}",
+                unexpected,
+            ),
+        }
+    }
+/*
     use futures::StreamExt;
     use hyper;
     use tokio;
@@ -530,5 +600,5 @@ mod tube_tests {
         let actual_events = stream.collect::<Vec<TubeEvent>>().await;
         assert_eq!(actual_events, expected_events);
     }
-}
 */
+}

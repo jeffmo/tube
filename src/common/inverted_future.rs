@@ -65,7 +65,7 @@ mod inverted_future_tests {
 
     #[tokio::test]
     async fn unresolved_on_construction() {
-        let (future, resolver) = InvertedFuture::<()>::new();
+        let (future, _resolver) = InvertedFuture::<()>::new();
         assert_eq!(None, future.now_or_never());
     }
 

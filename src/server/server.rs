@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use crate::common::tube::Tube;
 use super::hyper_tubez_service::TubezMakeSvc;
 use super::server_context::ServerContext;
 use super::server_error::ServerError;
