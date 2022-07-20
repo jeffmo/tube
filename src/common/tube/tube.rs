@@ -20,7 +20,7 @@ pub enum AbortError {
     AlreadyAborted(frame::AbortReason),
     AlreadyClosed,
     FrameEncodeError(frame::FrameEncodeError),
-    TransportError(hyper::Error),
+    FatalTransportError(hyper::Error),
 }
 
 #[derive(Debug)]
@@ -77,7 +77,7 @@ async fn send_abort(
         // TODO: Should this just be a panic? If we get into this state we don't
         //       really know if the client and server are synchronized on the 
         //       state of this Tube...havoc?
-        Err(e) => Err(AbortError::TransportError(e)),
+        Err(e) => Err(AbortError::FatalTransportError(e)),
     }
 
     // TODO: !!! Need to somehow remove this tube from the channel's map of 
