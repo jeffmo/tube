@@ -1,12 +1,17 @@
 # Tube
 
 ```
-NOTE: Tube is a side-project of mine that I spend varying amounts of time on. My original goal for this project was to get more hands-on experience
-with how Rust's concurrency abstractions work and perform. As such, I've spent most of my time exploring how the design fits within the constraints
-of Rust and very little (AKA zero) time on polishing some of the API details, writing docs, or attempting to use Tubez in a real-world use case -- but
-each of those things are on my mental roadmap.
+NOTE: Tube is a side-project of mine that I spend varying amounts of 
+time on. My original goal for this project was to get more hands-on 
+experience with how Rust's concurrency abstractions work and perform. 
+As such, I've spent most of my time exploring how the design fits within 
+the constraints of Rust and very little (AKA zero) time on polishing 
+some of the API details, writing docs, or attempting to use Tubez in 
+a real-world use case -- but each of those things are on my mental 
+roadmap.
 
-Until this project makes more devopment progress, I do not recommend trying to do anything with it.
+Until this project makes more development progress, I do not recommend 
+trying to do anything with it.
 ```
 
 Tubez is an abstraction over http2/3 (and, eventually, websocket and webtransport) for establishing long-lived, uni- and bi-directional streams of binary
