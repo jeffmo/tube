@@ -6,7 +6,7 @@ with how Rust's concurrency abstractions work and perform. As such, I've spent m
 of Rust and very little (AKA zero) time on polishing some of the API details, writing docs, or attempting to use Tubez in a real-world use case -- but
 each of those things are on my mental roadmap.
 
-I do not recommend trying to do anything with this library as it is still in an exploratory state.
+Until this project makes more devopment progress, I do not recommend trying to do anything with it.
 ```
 
 Tubez is an abstraction over http2/3 (and, eventually, websocket and webtransport) for establishing long-lived, uni- and bi-directional streams of binary
