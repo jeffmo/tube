@@ -11,5 +11,5 @@ I do not recommend trying to do anything with this library as it is still in an 
 
 Tubez is an abstraction over http2/3 (and, eventually, websocket and webtransport) for establishing long-lived, uni- and bi-directional streams of binary
 data (called a "Tube") between a client and a server with an extremely simple API. It supports both client- and server-initiated Tubes, Tube-lifecycle
-management, and uses a custom framing protocol with future intention to support intelligent routing and load-balancing with minimal compromise to
+management, and uses a custom framing protocol with future intention to support intelligent routing and load-balancing of Tubes with minimal compromise to
 data privacy.
