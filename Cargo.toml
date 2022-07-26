@@ -1,8 +1,8 @@
 [package]
-name = "tubez"
+name = "tube"
 version = "0.1.0"
 edition = "2021"
-repository = "https://github.com/jeffmo/tubez"
+repository = "https://github.com/jeffmo/tube"
 license = "MIT"
 readme = "README.md"
 
