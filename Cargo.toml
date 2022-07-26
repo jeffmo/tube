@@ -5,6 +5,7 @@ edition = "2021"
 repository = "https://github.com/jeffmo/tube"
 license = "MIT"
 readme = "README.md"
+description = "Tube is an abstraction over http2/3 (and, eventually, websocket and webtransport) for establishing long-lived, uni- and bi-directional streams of binary data (called a 'Tube') between a client and a server with an extremely simple API."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
