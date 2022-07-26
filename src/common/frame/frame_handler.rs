@@ -65,9 +65,7 @@ impl<'a> FrameHandler<'a> {
         data_sender: &mut Arc<tokio::sync::Mutex<hyper::body::Sender>>,
     ) -> Result<FrameHandlerResult, FrameHandlerError> {
         match frame {
-            frame::Frame::ClientHasFinishedSending {
-                tube_id,
-            } => {
+            frame::Frame::ClientHasFinishedSending { tube_id } => {
                 if let PeerType::Client = self.peer_type {
                     return Err(FrameHandlerError::InappropriateHasFinishedSendingFrameFromPeer);
                 }
@@ -121,10 +119,8 @@ impl<'a> FrameHandler<'a> {
                 // TODO
             },
 
-            frame::Frame::NewTube { 
-                tube_id, 
-                headers: _, // TODO
-            } => {
+            // TODO: Handle NewTube headers
+            frame::Frame::NewTube { tube_id, headers: _ } => {
                 if let PeerType::Client = self.peer_type {
                     return Err(FrameHandlerError::ServerInitiatedTubesNotImplemented);
                 }
@@ -167,11 +163,7 @@ impl<'a> FrameHandler<'a> {
                 */
             },
 
-            frame::Frame::Payload {
-                tube_id,
-                ack_id,
-                ref data,
-            } => {
+            frame::Frame::Payload { tube_id, ack_id, ref data } => {
                 let tube_mgr = match self.get_tube_mgr(&tube_id) {
                     Some(tm) => tm,
                     None => return Err(FrameHandlerError::UntrackedTubeId(frame)),
@@ -197,10 +189,7 @@ impl<'a> FrameHandler<'a> {
                 }
             },
 
-            frame::Frame::PayloadAck {
-                tube_id,
-                ack_id,
-            } => {
+            frame::Frame::PayloadAck { tube_id, ack_id } => {
                 let tube_mgr = match self.get_tube_mgr(&tube_id) {
                     Some(tm) => tm,
                     None => return Err(FrameHandlerError::UntrackedTubeId(frame)),
@@ -216,9 +205,7 @@ impl<'a> FrameHandler<'a> {
                 };
             },
 
-            frame::Frame::ServerHasFinishedSending {
-                tube_id,
-            } => {
+            frame::Frame::ServerHasFinishedSending { tube_id } => {
                 if let PeerType::Server = self.peer_type {
                     return Err(FrameHandlerError::InappropriateHasFinishedSendingFrameFromPeer);
                 }
@@ -268,10 +255,7 @@ impl<'a> FrameHandler<'a> {
                 }
             },
 
-            frame::Frame::Abort {
-                tube_id,
-                ref reason,
-            } => {
+            frame::Frame::Abort { tube_id, ref reason } => {
                 let tube_mgr = match self.get_tube_mgr(&tube_id) {
                     Some(tm) => tm,
                     None => return Err(FrameHandlerError::UntrackedTubeId(frame)),
