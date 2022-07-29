@@ -31,6 +31,14 @@ pub struct Channel {
 impl Channel {
     pub(in crate::client) async fn new(
         hyper_client: &hyper::Client<hyper::client::HttpConnector>,
+        headers: HashMap<String, String>,
+        server_uri: &hyper::Uri,
+    ) -> Result<Self, ChannelConnectError> {
+        Self::new_impl(hyper_client, headers, server_uri).await
+    }
+
+    async fn new_impl(
+        hyper_client: &hyper::Client<hyper::client::HttpConnector>,
         _headers: HashMap<String, String>, // TODO
         server_uri: &hyper::Uri,
     ) -> Result<Self, ChannelConnectError> {

@@ -40,7 +40,7 @@ async fn main() {
     let cli_args = CLIArgs::parse();
 
     println!("Creating client...");
-    let mut client = tubez::Client::new(cli_args.server_uri);
+    let mut client = tube::Client::new(cli_args.server_uri);
     println!("Creating channel...");
     let channel_headers = HashMap::new();
     let mut channel = client.make_tube_channel(channel_headers).await.expect(

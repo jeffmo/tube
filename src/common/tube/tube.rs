@@ -15,31 +15,36 @@ use super::tube_event::TubeEvent_StreamError;
 use super::tube_manager::TubeCompletionState;
 use super::tube_manager::TubeManager;
 
-#[derive(Debug)]
-pub enum AbortError {
-    AlreadyAborted(frame::AbortReason),
-    AlreadyClosed,
-    FrameEncodeError(frame::FrameEncodeError),
-    FatalTransportError(hyper::Error),
-}
+pub mod error {
+    use super::Duration;
+    use super::frame;
 
-#[derive(Debug)]
-pub enum HasFinishedSendingError {
-    AlreadyMarkedAsFinishedSending,
-    FrameEncodeError(frame::FrameEncodeError),
-    InternalError(String),
-    FatalTransportError(hyper::Error),
-    TubeAlreadyAborted(frame::AbortReason),
-}
+    #[derive(Debug)]
+    pub enum AbortError {
+        AlreadyAborted(frame::AbortReason),
+        AlreadyClosed,
+        FrameEncodeError(frame::FrameEncodeError),
+        FatalTransportError(hyper::Error),
+    }
 
-#[derive(Debug)]
-pub enum SendError {
-    AckIdAlreadyInUseInternalError,
-    AckIdsExhausted,
-    FrameEncodeError(frame::FrameEncodeError),
-    TimedOutWaitingOnAck(Duration),
-    TransportError(hyper::Error),
-    UnknownTransportError,
+    #[derive(Debug)]
+    pub enum HasFinishedSendingError {
+        AlreadyMarkedAsFinishedSending,
+        FrameEncodeError(frame::FrameEncodeError),
+        InternalError(String),
+        FatalTransportError(hyper::Error),
+        TubeAlreadyAborted(frame::AbortReason),
+    }
+
+    #[derive(Debug)]
+    pub enum SendError {
+        AckIdAlreadyInUseInternalError,
+        AckIdsExhausted,
+        FrameEncodeError(frame::FrameEncodeError),
+        TimedOutWaitingOnAck(Duration),
+        TransportError(hyper::Error),
+        UnknownTransportError,
+    }
 }
 
 async fn send_abort(
@@ -47,10 +52,10 @@ async fn send_abort(
     reason: frame::AbortReason,
     tube_manager: &Arc<Mutex<TubeManager>>,
     sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,
-) -> Result<(), AbortError> {
+) -> Result<(), error::AbortError> {
     let frame_data = match frame::encode_abort_frame(tube_id, reason.clone()) {
         Ok(frame_data) => frame_data,
-        Err(e) => return Err(AbortError::FrameEncodeError(e)),
+        Err(e) => return Err(error::AbortError::FrameEncodeError(e)),
     };
 
     {
@@ -58,10 +63,10 @@ async fn send_abort(
         match &mut tube_mgr.completion_state {
             TubeCompletionState::AbortedFromLocal(reason) | 
                 TubeCompletionState::AbortedFromRemote(reason) => 
-                return Err(AbortError::AlreadyAborted(reason.clone())),
+                return Err(error::AbortError::AlreadyAborted(reason.clone())),
 
             TubeCompletionState::Closed => 
-                return Err(AbortError::AlreadyClosed),
+                return Err(error::AbortError::AlreadyClosed),
                 
             _ => (),
         };
@@ -77,7 +82,7 @@ async fn send_abort(
         // TODO: Should this just be a panic? If we get into this state we don't
         //       really know if the client and server are synchronized on the 
         //       state of this Tube...havoc?
-        Err(e) => Err(AbortError::FatalTransportError(e)),
+        Err(e) => Err(error::AbortError::FatalTransportError(e)),
     }
 
     // TODO: !!! Need to somehow remove this tube from the channel's map of 
@@ -91,7 +96,7 @@ async fn send_has_finished_sending(
     tube_id: u16,
     tube_manager: &Arc<Mutex<TubeManager>>,
     sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,
-) -> Result<(), HasFinishedSendingError> {
+) -> Result<(), error::HasFinishedSendingError> {
     let maybe_frame_data = match peer_type {
         PeerType::Client => 
             frame::encode_client_has_finished_sending_frame(tube_id),
@@ -100,7 +105,7 @@ async fn send_has_finished_sending(
     };
     let frame_data = match maybe_frame_data {
         Ok(data) => data,
-        Err(e) => return Err(HasFinishedSendingError::FrameEncodeError(e)),
+        Err(e) => return Err(error::HasFinishedSendingError::FrameEncodeError(e)),
     };
 
     {
@@ -117,10 +122,10 @@ async fn send_has_finished_sending(
             (&ClientHasFinishedSending, &Client) | 
                 (&ServerHasFinishedSending, &Server) |
                 (&Closed, _) =>
-                return Err(HasFinishedSendingError::AlreadyMarkedAsFinishedSending),
+                return Err(error::HasFinishedSendingError::AlreadyMarkedAsFinishedSending),
             (&AbortedFromLocal(ref reason), _) |
                 (&AbortedFromRemote(ref reason), _) =>
-                return Err(HasFinishedSendingError::TubeAlreadyAborted(reason.clone())),
+                return Err(error::HasFinishedSendingError::TubeAlreadyAborted(reason.clone())),
         };
 
         tube_mgr.completion_state = new_state;
@@ -147,7 +152,7 @@ async fn send_has_finished_sending(
         // At this point the Tube is considered terminal in an Aborted state and
         // cannot send or receive data. The application must be replace it with
         // a new Tube.
-        return Err(HasFinishedSendingError::FatalTransportError(e));
+        return Err(error::HasFinishedSendingError::FatalTransportError(e));
     }
 
     // TODO: !!! Need to somehow remove this tube from the channel's map of 
@@ -168,14 +173,14 @@ pub struct Tube {
     peer_type: PeerType,
 }
 impl Tube {
-    pub async fn abort(&mut self, ) -> Result<(), AbortError> {
+    pub async fn abort(&mut self, ) -> Result<(), error::AbortError> {
         self.abort_internal(frame::AbortReason::ApplicationAbort).await
     }
     
     pub(in crate) async fn abort_internal(
         &mut self, 
         reason: frame::AbortReason,
-    ) -> Result<(), AbortError> {
+    ) -> Result<(), error::AbortError> {
         send_abort(
             self.tube_id.val(), 
             reason, 
@@ -188,7 +193,7 @@ impl Tube {
         return self.tube_id.val();
     }
 
-    pub async fn has_finished_sending(&self) -> Result<(), HasFinishedSendingError> {
+    pub async fn has_finished_sending(&self) -> Result<(), error::HasFinishedSendingError> {
         send_has_finished_sending(
             self.peer_type,
             self.tube_id.val(),
@@ -216,10 +221,10 @@ impl Tube {
         &mut self, 
         data: Vec<u8>,
         ack_timeout: Duration,
-    ) -> Result<(), SendError> {
+    ) -> Result<(), error::SendError> {
         let ack_id = match self.ackid_manager.take_id() {
             Ok(ack_id) => ack_id,
-            Err(UniqueIdError::NoIdsAvailable) => return Err(SendError::AckIdsExhausted),
+            Err(UniqueIdError::NoIdsAvailable) => return Err(error::SendError::AckIdsExhausted),
         };
 
         let frame_data = match frame::encode_payload_frame(
@@ -228,14 +233,14 @@ impl Tube {
             data,
         ) {
             Ok(frame_data) => frame_data,
-            Err(e) => return Err(SendError::FrameEncodeError(e)),
+            Err(e) => return Err(error::SendError::FrameEncodeError(e)),
         };
 
         let (sendack_future, sendack_resolver) = InvertedFuture::<()>::new();
         {
             let mut tube_mgr = self.tube_manager.lock().unwrap();
             if let Err(_) = tube_mgr.sendacks.try_insert(ack_id.val(), sendack_resolver) {
-                return Err(SendError::AckIdAlreadyInUseInternalError)
+                return Err(error::SendError::AckIdAlreadyInUseInternalError)
             }
         }
 
@@ -244,7 +249,7 @@ impl Tube {
             if let Err(e) = sender.send_data(frame_data.into()).await {
                 let mut tube_mgr = self.tube_manager.lock().unwrap();
                 tube_mgr.sendacks.remove(&ack_id.val());
-                return Err(SendError::TransportError(e))
+                return Err(error::SendError::TransportError(e))
             }
         };
 
@@ -258,23 +263,23 @@ impl Tube {
         }
 
         if let Err(_) = sendack_future_result {
-            return Err(SendError::TimedOutWaitingOnAck(ack_timeout));
+            return Err(error::SendError::TimedOutWaitingOnAck(ack_timeout));
         }
 
         Ok(())
 
     }
 
-    pub async fn send_and_forget(&mut self, data: Vec<u8>) -> Result<(), SendError> {
+    pub async fn send_and_forget(&mut self, data: Vec<u8>) -> Result<(), error::SendError> {
         match frame::encode_payload_frame(self.tube_id.val(), None, data) {
             Ok(frame_data) => {
                 let mut sender = self.sender.lock().await;
                 if let Err(e) = sender.send_data(frame_data.into()).await {
-                    return Err(SendError::TransportError(e));
+                    return Err(error::SendError::TransportError(e));
                 }
                 Ok(())
             },
-            Err(e) => Err(SendError::FrameEncodeError(e)),
+            Err(e) => Err(error::SendError::FrameEncodeError(e)),
         }
     }
 }
@@ -463,7 +468,7 @@ mod tube_tests {
         }
 
         match tube.send("test data".into(), Duration::from_millis(100)).await {
-            Err(tube::SendError::AckIdAlreadyInUseInternalError) => {
+            Err(tube::error::SendError::AckIdAlreadyInUseInternalError) => {
                 let tube_mgr = tube_stuff.tube_manager.lock().unwrap();
                 assert_eq!(tube_mgr.sendacks.len(), 1);
                 assert!(tube_mgr.sendacks.contains_key(&0));
@@ -482,7 +487,7 @@ mod tube_tests {
         let (mut tube, tube_stuff) = make_test_tube();
         let timeout = Duration::from_nanos(1);
         match tube.send("test data".into(), timeout.clone()).await {
-            Err(tube::SendError::TimedOutWaitingOnAck(err_timeout)) => {
+            Err(tube::error::SendError::TimedOutWaitingOnAck(err_timeout)) => {
                 assert_eq!(err_timeout, timeout);
 
                 // There should be no SendAck entry left polluting the TubeManager

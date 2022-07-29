@@ -3,10 +3,10 @@ use futures::StreamExt;
 use clap::Parser;
 use simple_logger::SimpleLogger;
 
-use tubez::server::ChannelEvent;
-use tubez::server::ServerEvent;
-use tubez::tube::Tube;
-use tubez::tube::TubeEvent;
+use tube::server::ChannelEvent;
+use tube::server::ServerEvent;
+use tube::tube::Tube;
+use tube::tube::TubeEvent;
 
 #[derive(Parser)]
 struct CLIArgs {
@@ -32,7 +32,7 @@ fn spawn_tube_handler(mut tube: Tube) {
   });
 }
 
-fn spawn_channel_handler(mut channel: tubez::server::Channel) {
+fn spawn_channel_handler(mut channel: tube::server::Channel) {
     tokio::spawn(async move {
         while let Some(channel_event) = channel.next().await {
             match channel_event {
@@ -58,7 +58,7 @@ async fn main() {
     let cli_args = CLIArgs::parse();
 
     println!("Starting server bound to `{}`...", &cli_args.bind_addr);
-    let mut server = tubez::Server::new(&cli_args.bind_addr).await;
+    let mut server = tube::Server::new(&cli_args.bind_addr).await;
     println!("Server started.\n");
 
     println!("Waiting on Tubes...");
@@ -71,7 +71,7 @@ async fn main() {
             while let Some(tube_event) = tube.next().await {
               println!("TubeEvent: {:?}", tube_event);
               match tube_event {
-                tubez::tube::TubeEvent::ClientHasFinishedSending => {
+                tube::tube::TubeEvent::ClientHasFinishedSending => {
                   println!("  responding with ServerHasFinishedSending...");
                   tube.has_finished_sending().await.unwrap();
                   println!("    sent!");
