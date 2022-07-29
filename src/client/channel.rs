@@ -27,10 +27,6 @@ pub enum MakeTubeError {
 
 pub struct Channel {
     body_sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>,
-    pending_newtubes: Arc<Mutex<HashMap<
-        u16, 
-        InvertedFutureResolver</*TODO: Result response from server?*/()>,
-    >>>,
     tube_id_manager: UniqueIdManager,
     tube_managers: Arc<Mutex<HashMap<u16, Arc<Mutex<tube::TubeManager>>>>>,
 }
@@ -63,19 +59,15 @@ impl Channel {
         };
         let mut res_body = response.into_body();
         let tube_managers = Arc::new(Mutex::new(HashMap::new()));
-        let pending_newtubes = Arc::new(Mutex::new(HashMap::new()));
 
         let body_sender_weak = Arc::downgrade(&body_sender);
-        let pending_newtubes2 = pending_newtubes.clone();
         let tube_mgrs2 = tube_managers.clone();
         tokio::spawn(async move {
-            let pending_newtubes = pending_newtubes2;
             let mut tube_mgrs = tube_mgrs2;
             let mut frame_decoder = frame::Decoder::new();
             let mut frame_handler = frame::FrameHandler::new(
                 PeerType::Client,
                 &mut tube_mgrs,
-                pending_newtubes,
             );
 
             while let Some(data_result) = res_body.data().await {
@@ -130,7 +122,6 @@ impl Channel {
 
         Ok(Channel {
             body_sender: body_sender,
-            pending_newtubes,
             tube_id_manager: UniqueIdManager::new_with_odd_ids(),
             tube_managers,
         })
@@ -151,40 +142,18 @@ impl Channel {
             Err(e) => return Err(MakeTubeError::FrameEncodeError(e)),
         };
 
-        let (newtube_future, newtube_resolver) = InvertedFuture::<()>::new();
-        {
-            let mut pending_newtubes = self.pending_newtubes.lock().unwrap();
-            if let Err(_) = pending_newtubes.try_insert(tube_id_val, newtube_resolver) {
-                return Err(MakeTubeError::InternalErrorDuplicateTubeId(tube_id_val));
-            }
-        };
-
         {
             let mut body_sender = self.body_sender.lock().await;
+            log::trace!("Sending MakeTube(id={}) frame...", &tube_id);
             if let Err(_bytes) = body_sender.send_data(estab_tube_frame.into()).await {
                 // TODO: Should we panic here? Is it possible that the data was 
                 //       sent (even with some kind of error here) and now the 
                 //       client/server have disjoint states?
-                {
-                    // TODO: Maybe this can/should happen in Tube::drop()? That 
-                    //       would ensure these entries never outlive the Tube 
-                    //       itself...
-                    let mut pending_newtubes = self.pending_newtubes.lock().unwrap();
-                    pending_newtubes.remove(&tube_id_val);
-                }
+                //      
+                //       Need to think this through more...
                 return Err(MakeTubeError::UnknownTransportError);
             }
         };
-
-        log::trace!("Awaiting response NewTube frame...");
-        // TODO: !!! It's unfortunate that we have to block on a whole round-trip
-        //       here... Maybe we should just emit the Tube, buffer sends until
-        //       a response is received (or timeout), then have the Tube itself
-        //       only emit events after a successful response received from 
-        //       remote peer? A failure/timeout response from peer marks the 
-        //       tube as terminally Errored.
-        // TODO: Add a (user-specifiable) timeout here!
-        newtube_future.await;
 
         let tube_mgr = Arc::new(Mutex::new(tube::TubeManager::new()));
         let tube = tube::Tube::new(

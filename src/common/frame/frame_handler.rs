@@ -22,6 +22,7 @@ pub enum FrameHandlerError {
     ReceivedHasFinishedSendingAfterRemoteAbort { tube_id: u16 },
     ServerInitiatedTubesNotImplemented,
     TubeManagerInsertionError { tube_id: u16 },
+    UnexpectedFrameBeforePeerAck(frame::Frame),
     UntrackedAckId {
         tube_id: u16,
         ack_id: u16,
@@ -41,18 +42,15 @@ pub enum FrameHandlerResult {
 
 pub struct FrameHandler<'a> {
     peer_type: PeerType,
-    pending_newtubes: Arc<Mutex<HashMap<u16, InvertedFutureResolver<()>>>>,
     tube_managers: &'a mut Arc<Mutex<HashMap<u16, Arc<Mutex<tube::TubeManager>>>>>,
 }
 impl<'a> FrameHandler<'a> {
     pub fn new(
         peer_type: PeerType,
         tube_managers: &'a mut Arc<Mutex<HashMap<u16, Arc<Mutex<tube::TubeManager>>>>>,
-        pending_newtubes: Arc<Mutex<HashMap<u16, InvertedFutureResolver<()>>>>,
     ) -> Self {
         FrameHandler {
             peer_type,
-            pending_newtubes,
             tube_managers,
         }
     }
@@ -127,18 +125,6 @@ impl<'a> FrameHandler<'a> {
 
             // TODO: Handle NewTube headers
             frame::Frame::NewTube { tube_id, headers: _ } => {
-                // Check if this is a response from the remote peer regarding 
-                // a Tube this peer is initiating and awaiting a response for.
-                {
-                    let mut pending_newtubes = self.pending_newtubes.lock().unwrap();
-                    if let Some(mut resolver) = pending_newtubes.remove(&tube_id) {
-                        // TODO: Extract returned response code (etc) and pass 
-                        //       along through the resolver
-                        resolver.resolve(());
-                        return Ok(FrameHandlerResult::FullyHandled);
-                    }
-                };
-
                 if let PeerType::Client = self.peer_type {
                     return Err(FrameHandlerError::ServerInitiatedTubesNotImplemented);
                 }
@@ -149,24 +135,6 @@ impl<'a> FrameHandler<'a> {
                         tube_id,
                     });
                 }
-
-                log::trace!("Sending NewTube response to Tube(id={}) initiator...(TODO)", &tube_id);
-                // TODO: Think through possible responses and maybe enumify/document them?
-                let response_headers = HashMap::from([("result".into(), "200".into())]);
-                let response_framedata = match encode::newtube_frame(
-                    tube_id, 
-                    response_headers,
-                ) {
-                    Ok(data) => data,
-                    Err(e) => return Err(FrameHandlerError::NewTubeResponseEncodingError(e)),
-                };
-                {
-                    let mut sender = data_sender.lock().await;
-                    log::trace!("Acknowledging received NewTube to peer...");
-                    if let Err(e) = sender.send_data(response_framedata.into()).await {
-                        return Err(FrameHandlerError::NewTubeResponseTransmitError(e));
-                    }
-                };
 
                 log::trace!("Emitting tube...");
                 let tube_id = UniqueId::new(tube_id, None);

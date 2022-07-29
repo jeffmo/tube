@@ -46,6 +46,18 @@ pub mod error {
     }
 }
 
+enum TransportAction {
+  SendApplicationAbort,
+  SendHasFinishedSending,
+  SendPayload { 
+      data: Vec<u8>,
+      ack_timeout: Duration,
+  },
+  SendAndForgetPayload {
+      data: Vec<u8>,
+  },
+}
+
 async fn send_abort(
     tube_id: u16,
     reason: frame::AbortReason,
@@ -173,7 +185,7 @@ pub struct Tube {
     peer_type: PeerType,
 }
 impl Tube {
-    pub async fn abort(&mut self, ) -> Result<(), error::AbortError> {
+    pub async fn abort(&mut self) -> Result<(), error::AbortError> {
         self.abort_internal(frame::AbortReason::ApplicationAbort).await
     }
     
@@ -268,7 +280,6 @@ impl Tube {
         }
 
         Ok(())
-
     }
 
     pub async fn send_and_forget(&mut self, data: Vec<u8>) -> Result<(), error::SendError> {

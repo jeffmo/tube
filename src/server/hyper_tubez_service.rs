@@ -54,14 +54,9 @@ impl hyper::service::Service<hyper::Request<hyper::Body>> for TubezHttpReq {
         tokio::spawn(async move {
             let mut frame_decoder = frame::Decoder::new();
             let mut tube_store = Arc::new(Mutex::new(HashMap::new()));
-            // TODO: Need to move this up into the channel/channel_ctx or 
-            //       something so it can be inserted into when a 
-            //       server-initiated Tube is created.
-            let pending_newtubes = Arc::new(Mutex::new(HashMap::new()));
             let mut frame_handler = frame::FrameHandler::new(
                 PeerType::Server,
                 &mut tube_store,
-                pending_newtubes,
             );
 
             while let Some(data_result) = body.data().await {
