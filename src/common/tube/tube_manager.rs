@@ -20,7 +20,6 @@ pub(in crate) enum TubeCompletionState {
 pub(in crate) struct TubeManager {
     pub(in crate) pending_events: VecDeque<tube_event::TubeEvent>,
     pub(in crate) sendacks: HashMap<u16, InvertedFutureResolver<()>>,
-    pub(in crate) state_machine: tube_event::StateMachine,
     pub(in crate) terminated: bool,
     pub(in crate) completion_state: TubeCompletionState,
     pub(in crate) waker: Option<task::Waker>,
@@ -29,7 +28,6 @@ impl TubeManager {
     pub(in crate) fn new() -> Self {
         TubeManager {
             sendacks: HashMap::new(),
-            state_machine: tube_event::StateMachine::new(),
             pending_events: VecDeque::new(),
             terminated: false,
             completion_state: TubeCompletionState::Open,

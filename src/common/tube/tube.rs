@@ -9,9 +9,9 @@ use crate::common::PeerType;
 use crate::common::UniqueId;
 use crate::common::UniqueIdError;
 use crate::common::UniqueIdManager;
-use super::tube_event;
-use super::tube_event::TubeEvent;
-use super::tube_event::TubeEvent_StreamError;
+use super::TubeEvent;
+use super::TubeEvent_StreamError;
+use super::TubeEventTag;
 use super::tube_manager::TubeCompletionState;
 use super::tube_manager::TubeManager;
 
@@ -167,6 +167,7 @@ async fn send_has_finished_sending(
 #[derive(Debug)]
 pub struct Tube {
     ackid_manager: UniqueIdManager,
+    last_tube_event: Option<TubeEventTag>,
     sender: Arc<tokio::sync::Mutex<hyper::body::Sender>>,
     tube_id: UniqueId,
     tube_manager: Arc<Mutex<TubeManager>>,
@@ -210,6 +211,7 @@ impl Tube {
     ) -> Self {
         Tube {
             ackid_manager: UniqueIdManager::new(),
+            last_tube_event: None,
             sender,
             tube_id,
             tube_manager,
@@ -293,23 +295,9 @@ impl futures::stream::Stream for Tube {
         let mut tube_mgr = self.tube_manager.lock().unwrap();
         tube_mgr.waker = Some(cx.waker().clone());
 
-        match tube_mgr.pending_events.pop_front() {
-            Some(tube_event) => match tube_mgr.state_machine.transition_to(&tube_event) {
-                tube_event::StateMachineTransitionResult::Valid => {
-                    futures::task::Poll::Ready(Some(tube_event))
-                },
-                tube_event::StateMachineTransitionResult::Invalid(from, to) => {
-                    // TODO: Print some kind of error?
-                    tube_mgr.terminated = true;
-
-                    let error_event = TubeEvent::StreamError(
-                        TubeEvent_StreamError::InvalidTubeEventTransition(from, to)
-                    );
-                    futures::task::Poll::Ready(Some(error_event))
-                }
-            },
-
-            None => {
+        match (self.last_tube_event.as_ref(), tube_mgr.pending_events.pop_front()) {
+            // No more pending_events
+            (_, None) => {
                 use TubeCompletionState::*;
                 match (&self.peer_type, &tube_mgr.completion_state) {
                     (_, AbortedFromLocal(_)) |
@@ -326,7 +314,14 @@ impl futures::stream::Stream for Tube {
                     (&PeerType::Server, &Closed | &ClientHasFinishedSending) =>
                         futures::task::Poll::Ready(None),
                 }
-            }
+            },
+
+            // TODO: Enumerate various TubeEvents and validate state transitions 
+            //       here. Issue a 
+            //       TubeEvent::StreamError(InvalidTubeEventTransition) when the
+            //       transition doesn't make sense.
+            (_, Some(tube_event)) => 
+                futures::task::Poll::Ready(Some(tube_event)),
         }
     }
 }
@@ -413,16 +408,6 @@ impl Drop for Tube {
             },
         }
     }
-}
-
-#[cfg(test)]
-impl Tube {
-    /*
-    pub fn set_test_events(&mut self, events: Vec<TubeEvent>) {
-        let mut tube_mgr = self.tube_manager.lock().unwrap();
-        tube_mgr.pending_events = VecDeque::from(events);
-    }
-    */
 }
 
 #[cfg(test)]

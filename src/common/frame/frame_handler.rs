@@ -127,10 +127,6 @@ impl<'a> FrameHandler<'a> {
 
                 let mut tube_mgr = tube::TubeManager::new();
 
-                // TODO: Actually Authenticate... 
-                //       Probably want to do this in TubeManager::new()? Maybe? Not sure...
-                tube_mgr.state_machine.transition_to(&tube::TubeEvent::AuthenticatedAndReady);
-
                 let tube_mgr = Arc::new(Mutex::new(tube_mgr));
                 if let Err(_) = self.tube_managers.lock().unwrap().try_insert(tube_id, tube_mgr.clone()) {
                     return Err(FrameHandlerError::TubeManagerInsertionError {
