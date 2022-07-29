@@ -196,7 +196,7 @@ mod decoder_tests {
     use std::collections::HashMap;
 
     use super::*;
-    use super::super::encoder;
+    use super::super::encode;
 
     #[test]
     fn empty_data_yields_empty_vec() {
@@ -209,7 +209,7 @@ mod decoder_tests {
     #[test]
     fn partial_data_yields_empty_vec_until_rest_of_data_provided() {
         let mut decoder = Decoder::new();
-        let mut data = encoder::encode_client_has_finished_sending_frame(43).unwrap();
+        let mut data = encode::client_has_finished_sending_frame(43).unwrap();
 
         let final_byte = data.pop().unwrap();
         let decoded_frames = &decoder.decode(data).unwrap();
@@ -224,8 +224,8 @@ mod decoder_tests {
     fn data_for_two_full_frames_yield_two_frames() {
         let mut decoder = Decoder::new();
 
-        let mut data = encoder::encode_client_has_finished_sending_frame(43).unwrap();
-        data.append(&mut encoder::encode_server_has_finished_sending_frame(42).unwrap());
+        let mut data = encode::client_has_finished_sending_frame(43).unwrap();
+        data.append(&mut encode::server_has_finished_sending_frame(42).unwrap());
 
         let decoded_frames = &decoder.decode(data).unwrap();
         assert_eq!(decoded_frames.len(), 2);
@@ -237,8 +237,8 @@ mod decoder_tests {
     fn full_frame_plus_partial_frame_yields_single_frame_until_rest_of_second_frame_provided() {
         let mut decoder = Decoder::new();
 
-        let mut data = encoder::encode_client_has_finished_sending_frame(43).unwrap();
-        data.append(&mut encoder::encode_server_has_finished_sending_frame(42).unwrap());
+        let mut data = encode::client_has_finished_sending_frame(43).unwrap();
+        data.append(&mut encode::server_has_finished_sending_frame(42).unwrap());
         let final_byte = data.pop().unwrap();
 
         let decoded_frames = &decoder.decode(data).unwrap();
@@ -258,7 +258,7 @@ mod decoder_tests {
           ("header1".to_string(), "value1".to_string()),
           ("header2".to_string(), "value2".to_string()),
         ]);
-        let mut data = encoder::encode_newtube_frame(42, headers).unwrap();
+        let mut data = encode::newtube_frame(42, headers).unwrap();
 
         // Tweak encoded data to insert an invalid utf8 byte into the encoded 
         // headers region of the frame.
@@ -291,7 +291,7 @@ mod decoder_tests {
         let mut decoder = Decoder::new();
 
         let headers = HashMap::from([]);
-        let correct_data = encoder::encode_newtube_frame(42, headers).unwrap();
+        let correct_data = encode::newtube_frame(42, headers).unwrap();
 
         // Tweak encoded data to insert invalid json into the headers portion 
         // of the frame.
@@ -336,7 +336,7 @@ mod decoder_tests {
     fn errors_if_frametype_value_is_unknown() {
         let mut decoder = Decoder::new();
 
-        let mut data = encoder::encode_client_has_finished_sending_frame(43).unwrap();
+        let mut data = encode::client_has_finished_sending_frame(43).unwrap();
 
         // Tweak encoded data to use an invalid FrameType value
         data[0] = 255;

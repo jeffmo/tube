@@ -7,7 +7,7 @@ use crate::common::InvertedFutureResolver;
 use super::tube_event;
 
 #[derive(Clone,Debug,PartialEq)]
-pub(in crate) enum TubeCompletionState {
+pub enum TubeCompletionState {
     Open,
     ClientHasFinishedSending,
     ServerHasFinishedSending,
@@ -17,15 +17,15 @@ pub(in crate) enum TubeCompletionState {
 }
 
 #[derive(Debug)]
-pub(in crate) struct TubeManager {
-    pub(in crate) pending_events: VecDeque<tube_event::TubeEvent>,
-    pub(in crate) sendacks: HashMap<u16, InvertedFutureResolver<()>>,
-    pub(in crate) terminated: bool,
-    pub(in crate) completion_state: TubeCompletionState,
-    pub(in crate) waker: Option<task::Waker>,
+pub struct TubeManager {
+    pub pending_events: VecDeque<tube_event::TubeEvent>,
+    pub sendacks: HashMap<u16, InvertedFutureResolver<()>>,
+    pub terminated: bool,
+    pub completion_state: TubeCompletionState,
+    pub waker: Option<task::Waker>,
 }
 impl TubeManager {
-    pub(in crate) fn new() -> Self {
+    pub fn new() -> Self {
         TubeManager {
             sendacks: HashMap::new(),
             pending_events: VecDeque::new(),

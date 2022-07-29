@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use serde_json;
-
 use super::frame;
 
 #[derive(Debug)]
@@ -11,7 +9,7 @@ pub enum FrameEncodeError {
     HeaderJsonEncodeError(serde_json::error::Error),
 }
 
-pub fn encode_abort_frame(
+pub fn abort_frame(
     tube_id: u16,
     reason: frame::AbortReason,
 ) -> Result<Vec<u8>, FrameEncodeError> {
@@ -26,7 +24,7 @@ pub fn encode_abort_frame(
     ])
 }
 
-pub fn encode_client_has_finished_sending_frame(
+pub fn client_has_finished_sending_frame(
     tube_id: u16,
 ) -> Result<Vec<u8>, FrameEncodeError> {
     let tubeid_bytes = tube_id.to_be_bytes();
@@ -38,7 +36,7 @@ pub fn encode_client_has_finished_sending_frame(
     ])
 }
 
-pub fn encode_drain_frame() -> Result<Vec<u8>, FrameEncodeError> {
+pub fn drain_frame() -> Result<Vec<u8>, FrameEncodeError> {
     Ok(vec![
         frame::DRAIN_FRAMETYPE,
         // bodylen=0
@@ -46,7 +44,7 @@ pub fn encode_drain_frame() -> Result<Vec<u8>, FrameEncodeError> {
     ])
 }
 
-pub fn encode_newtube_frame(
+pub fn newtube_frame(
     tube_id: u16, 
     headers: HashMap<String, String>
 ) -> Result<Vec<u8>, FrameEncodeError> {
@@ -68,7 +66,7 @@ pub fn encode_newtube_frame(
     Ok(bytes)
 }
 
-pub fn encode_payload_frame(
+pub fn payload_frame(
     tube_id: u16,
     ack_id: Option<u16>,
     mut data: Vec<u8>,
@@ -105,7 +103,7 @@ pub fn encode_payload_frame(
     Ok(bytes)
 }
 
-pub fn encode_payload_ack_frame(
+pub fn payload_ack_frame(
     tube_id: u16,
     ack_id: u16,
 ) -> Result<Vec<u8>, FrameEncodeError> {
@@ -125,7 +123,7 @@ pub fn encode_payload_ack_frame(
     ])
 }
 
-pub fn encode_server_has_finished_sending_frame(
+pub fn server_has_finished_sending_frame(
     tube_id: u16,
 ) -> Result<Vec<u8>, FrameEncodeError> {
     let tubeid_bytes = tube_id.to_be_bytes();
@@ -139,7 +137,9 @@ pub fn encode_server_has_finished_sending_frame(
 
 #[cfg(test)]
 mod encode_payload_tests {
-    use super::encode_payload_frame;
+    // Hacky aesthetic workaround for `use super as encode`
+    mod encode { pub use super::super::*; }
+
     use super::FrameEncodeError;
 
     #[test]
@@ -155,23 +155,23 @@ mod encode_payload_tests {
             }
         }
 
-        match encode_payload_frame(42, Some(42), data) {
+        match encode::payload_frame(42, Some(42), data) {
             Err(FrameEncodeError::DataTooLarge(size)) => assert_eq!(size, 66000),
             Err(err) => panic!(concat!(
                 "Received the wrong error when passing too much data to ",
-                "encode_payload_frame: {:?}"),
+                "encode::payload_frame: {:?}"),
                 err
             ),
             Ok(_) => panic!(concat!(
                 "Did not receive an error when passing too much data to ",
-                "encode_payload_frame!"
+                "encode::payload_frame!"
             )),
         }
     }
 
     #[test]
     fn errors_on_oversized_ackid() {
-        match encode_payload_frame(42, Some(65000), vec![]) {
+        match encode::payload_frame(42, Some(65000), vec![]) {
             Err(FrameEncodeError::AckIdTooLarge(size)) => assert_eq!(size, 65000),
             Err(err) => panic!(
                 "Received the wrong error when passing an oversized ack_id: {:?}",
@@ -179,7 +179,7 @@ mod encode_payload_tests {
             ),
             Ok(_) => panic!(concat!(
                 "Did not receive an error when passing an oversized ack_id to ",
-                "encode_payload_frame!"
+                "encode::payload_frame!"
             )),
         }
     }
@@ -187,12 +187,14 @@ mod encode_payload_tests {
 
 #[cfg(test)]
 mod encode_payload_ack_tests {
-    use super::encode_payload_ack_frame;
+    // Hacky aesthetic workaround for `use super as encode`
+    mod encode { pub use super::super::*; }
+
     use super::FrameEncodeError;
 
     #[test]
     fn errors_on_oversized_ackid() {
-        match encode_payload_ack_frame(42, 65000) {
+        match encode::payload_ack_frame(42, 65000) {
             Err(FrameEncodeError::AckIdTooLarge(size)) => assert_eq!(size, 65000),
             Err(err) => panic!(
                 "Received the wrong error when passing an oversized ack_id: {:?}",
@@ -200,7 +202,7 @@ mod encode_payload_ack_tests {
             ),
             Ok(_) => panic!(concat!(
                 "Did not receive an error when passing an oversized ack_id to ",
-                "encode_payload_ack_frame!"
+                "encode::payload_ack_frame!"
             )),
         }
     }

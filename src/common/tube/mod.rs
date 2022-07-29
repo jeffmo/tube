@@ -9,4 +9,4 @@ pub use tube_event::TubeEvent_StreamError;
 pub use tube_event::TubeEventTag;
 
 pub(in crate::common) use tube_manager::TubeCompletionState;
-pub(in crate) use tube_manager::TubeManager;
+pub use tube_manager::TubeManager;

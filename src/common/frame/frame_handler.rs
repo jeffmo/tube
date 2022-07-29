@@ -6,12 +6,12 @@ use crate::common::PeerType;
 use crate::common::tube;
 use crate::common::tube::TubeCompletionState;
 use crate::common::UniqueId;
-use super::encoder;
+use super::encode;
 use super::frame;
 
 #[derive(Debug)]
-pub(in crate) enum FrameHandlerError {
-    AckFrameEncodingError(encoder::FrameEncodeError),
+pub enum FrameHandlerError {
+    AckFrameEncodingError(encode::FrameEncodeError),
     AckFrameTransmitError(hyper::Error),
     DuplicateAbortFrame { tube_id: u16 },
     DuplicateHasFinishedSendingFrame { tube_id: u16 },
@@ -31,12 +31,12 @@ pub(in crate) enum FrameHandlerError {
 //       client code, and then handle NewTube event-publishing entirely here? If
 //       so we could eliminate FrameHandlerResult whose sole purpose is to host 
 //       FrameHandlerResult::NewTube...
-pub(in crate) enum FrameHandlerResult {
+pub enum FrameHandlerResult {
     FullyHandled,
     NewTube(tube::Tube),
 }
 
-pub(in crate) struct FrameHandler<'a> {
+pub struct FrameHandler<'a> {
     peer_type: PeerType,
     tube_managers: &'a mut Arc<Mutex<HashMap<u16, Arc<Mutex<tube::TubeManager>>>>>,
 }
@@ -167,7 +167,7 @@ impl<'a> FrameHandler<'a> {
 
                 // If an ack was requested, send one...
                 if let Some(ack_id) = ack_id {
-                    let frame_data = match encoder::encode_payload_ack_frame(tube_id, ack_id) {
+                    let frame_data = match encode::payload_ack_frame(tube_id, ack_id) {
                         Ok(data) => data,
                         Err(e) => return Err(FrameHandlerError::AckFrameEncodingError(e)),
                     };

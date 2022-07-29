@@ -23,14 +23,14 @@ pub mod error {
     pub enum AbortError {
         AlreadyAborted(frame::AbortReason),
         AlreadyClosed,
-        FrameEncodeError(frame::FrameEncodeError),
+        FrameEncodeError(frame::encode::FrameEncodeError),
         FatalTransportError(hyper::Error),
     }
 
     #[derive(Debug)]
     pub enum HasFinishedSendingError {
         AlreadyMarkedAsFinishedSending,
-        FrameEncodeError(frame::FrameEncodeError),
+        FrameEncodeError(frame::encode::FrameEncodeError),
         InternalError(String),
         FatalTransportError(hyper::Error),
         TubeAlreadyAborted(frame::AbortReason),
@@ -40,7 +40,7 @@ pub mod error {
     pub enum SendError {
         AckIdAlreadyInUseInternalError,
         AckIdsExhausted,
-        FrameEncodeError(frame::FrameEncodeError),
+        FrameEncodeError(frame::encode::FrameEncodeError),
         TimedOutWaitingOnAck(Duration),
         TransportError(hyper::Error),
         UnknownTransportError,
@@ -53,7 +53,7 @@ async fn send_abort(
     tube_manager: &Arc<Mutex<TubeManager>>,
     sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,
 ) -> Result<(), error::AbortError> {
-    let frame_data = match frame::encode_abort_frame(tube_id, reason.clone()) {
+    let frame_data = match frame::encode::abort_frame(tube_id, reason.clone()) {
         Ok(frame_data) => frame_data,
         Err(e) => return Err(error::AbortError::FrameEncodeError(e)),
     };
@@ -99,9 +99,9 @@ async fn send_has_finished_sending(
 ) -> Result<(), error::HasFinishedSendingError> {
     let maybe_frame_data = match peer_type {
         PeerType::Client => 
-            frame::encode_client_has_finished_sending_frame(tube_id),
+            frame::encode::client_has_finished_sending_frame(tube_id),
         PeerType::Server => 
-            frame::encode_server_has_finished_sending_frame(tube_id),
+            frame::encode::server_has_finished_sending_frame(tube_id),
     };
     let frame_data = match maybe_frame_data {
         Ok(data) => data,
@@ -229,7 +229,7 @@ impl Tube {
             Err(UniqueIdError::NoIdsAvailable) => return Err(error::SendError::AckIdsExhausted),
         };
 
-        let frame_data = match frame::encode_payload_frame(
+        let frame_data = match frame::encode::payload_frame(
             self.tube_id.val(), 
             Some(ack_id.val()), 
             data,
@@ -273,7 +273,7 @@ impl Tube {
     }
 
     pub async fn send_and_forget(&mut self, data: Vec<u8>) -> Result<(), error::SendError> {
-        match frame::encode_payload_frame(self.tube_id.val(), None, data) {
+        match frame::encode::payload_frame(self.tube_id.val(), None, data) {
             Ok(frame_data) => {
                 let mut sender = self.sender.lock().await;
                 if let Err(e) = sender.send_data(frame_data.into()).await {

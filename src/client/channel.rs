@@ -17,7 +17,7 @@ pub enum ChannelConnectError {
 
 #[derive(Debug)]
 pub enum MakeTubeError {
-    FrameEncodeError(frame::FrameEncodeError),
+    FrameEncodeError(frame::encode::FrameEncodeError),
     InternalErrorDuplicateTubeId(u16),
     TubeIdsExhausted,
     UnknownTransportError,
@@ -134,7 +134,7 @@ impl Channel {
           Err(UniqueIdError::NoIdsAvailable) => 
             return Err(MakeTubeError::TubeIdsExhausted),
         };
-        let estab_tube_frame = match frame::encode_newtube_frame(tube_id.val(), headers) {
+        let estab_tube_frame = match frame::encode::newtube_frame(tube_id.val(), headers) {
             Ok(data) => data,
             Err(e) => return Err(MakeTubeError::FrameEncodeError(e)),
         };
