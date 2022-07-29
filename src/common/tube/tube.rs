@@ -10,7 +10,6 @@ use crate::common::UniqueId;
 use crate::common::UniqueIdError;
 use crate::common::UniqueIdManager;
 use super::TubeEvent;
-use super::TubeEvent_StreamError;
 use super::TubeEventTag;
 use super::tube_manager::TubeCompletionState;
 use super::tube_manager::TubeManager;
