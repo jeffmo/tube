@@ -5,8 +5,6 @@ use std::sync::Mutex;
 use hyper::body::HttpBody;
 
 use crate::common::frame;
-use crate::common::InvertedFuture;
-use crate::common::InvertedFutureResolver;
 use crate::common::PeerType;
 use crate::common::tube;
 use crate::common::UniqueIdError;

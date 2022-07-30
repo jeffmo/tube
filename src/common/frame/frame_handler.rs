@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use crate::common::InvertedFutureResolver;
 use crate::common::PeerType;
 use crate::common::tube;
 use crate::common::tube::TubeCompletionState;
@@ -12,17 +11,16 @@ use super::frame;
 
 #[derive(Debug)]
 pub enum FrameHandlerError {
-    AckFrameEncodingError(encode::FrameEncodeError),
-    AckFrameTransmitError(hyper::Error),
+    AbortAckFrameEncodingError(encode::FrameEncodeError),
+    AbortAckTransmitError(hyper::Error),
     DuplicateAbortFrame { tube_id: u16 },
     DuplicateHasFinishedSendingFrame { tube_id: u16 },
     InappropriateHasFinishedSendingFrameFromPeer,
-    NewTubeResponseEncodingError(encode::FrameEncodeError),
-    NewTubeResponseTransmitError(hyper::Error),
+    PayloadAckFrameEncodingError(encode::FrameEncodeError),
+    PayloadAckTransmitError(hyper::Error),
     ReceivedHasFinishedSendingAfterRemoteAbort { tube_id: u16 },
     ServerInitiatedTubesNotImplemented,
     TubeManagerInsertionError { tube_id: u16 },
-    UnexpectedFrameBeforePeerAck(frame::Frame),
     UntrackedAckId {
         tube_id: u16,
         ack_id: u16,
@@ -171,12 +169,12 @@ impl<'a> FrameHandler<'a> {
                 if let Some(ack_id) = ack_id {
                     let frame_data = match encode::payload_ack_frame(tube_id, ack_id) {
                         Ok(data) => data,
-                        Err(e) => return Err(FrameHandlerError::AckFrameEncodingError(e)),
+                        Err(e) => return Err(FrameHandlerError::PayloadAckFrameEncodingError(e)),
                     };
                     let mut sender = data_sender.lock().await;
                     match sender.send_data(frame_data.into()).await {
                         Ok(_) => (),
-                        Err(e) => return Err(FrameHandlerError::AckFrameTransmitError(e)),
+                        Err(e) => return Err(FrameHandlerError::PayloadAckTransmitError(e)),
                     }
                 }
 
@@ -281,7 +279,30 @@ impl<'a> FrameHandler<'a> {
                 };
 
                 self.tube_managers.lock().unwrap().remove(&tube_id);
-            }
+
+                let abortack_frame_data = match encode::abort_ack_frame(tube_id) {
+                    Ok(data) => data,
+                    Err(e) => return Err(
+                        FrameHandlerError::AbortAckFrameEncodingError(e)
+                    ),
+                };
+                let mut sender = data_sender.lock().await;
+                log::trace!("Sending AbortAck(tube_id={})...", tube_id);
+                if let Err(e) = sender.send_data(abortack_frame_data.into()).await {
+                    return Err(FrameHandlerError::AbortAckTransmitError(e));
+                }
+            },
+
+            frame::Frame::AbortAck { tube_id } => {
+                // It is now safe to re-use tube_id for a future new tube!
+                let tube_mgr = match self.get_tube_mgr(&tube_id) {
+                    Some(tm) => tm,
+                    None => return Err(FrameHandlerError::UntrackedTubeId(frame)),
+                };
+                let mut tube_mgr = tube_mgr.lock().unwrap();
+                log::trace!("Removing Tube(id={}) from list of pending Aborts.", &tube_id);
+                tube_mgr.abort_pending_id_reservation = None
+            },
         };
 
         Ok(FrameHandlerResult::FullyHandled)

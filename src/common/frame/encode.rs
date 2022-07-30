@@ -24,6 +24,18 @@ pub fn abort_frame(
     ])
 }
 
+pub fn abort_ack_frame(
+    tube_id: u16,
+) -> Result<Vec<u8>, FrameEncodeError> {
+    let tubeid_bytes = tube_id.to_be_bytes();
+    Ok(vec![
+       frame::ABORTACK_FRAMETYPE,
+       0, 3,
+       tubeid_bytes[0],
+       tubeid_bytes[1],
+    ])
+}
+
 pub fn client_has_finished_sending_frame(
     tube_id: u16,
 ) -> Result<Vec<u8>, FrameEncodeError> {

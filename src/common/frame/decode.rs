@@ -122,6 +122,16 @@ fn parse_frame_body(frame_type: u8, mut frame_body_data: VecDeque<u8>)
             })
         },
 
+        frame::ABORTACK_FRAMETYPE => {
+            let tube_id = double_u8_to_u16(
+                frame_body_data[0],
+                frame_body_data[1],
+            );
+            Ok(frame::Frame::AbortAck {
+                tube_id,
+            })
+        },
+
         _ => Err(FrameParseError::UnknownFrameType(frame_type)),
     }
 }

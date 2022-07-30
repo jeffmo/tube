@@ -66,6 +66,7 @@ impl Drop for UniqueId {
         if !self.taken {
             if let Some(avail_ids) = &self.avail_ids {
                 let mut avail_ids = avail_ids.lock().unwrap();
+                log::trace!("Marking id={} as available again!", self.id);
                 avail_ids.push_back(self.id);
             }
         }

@@ -7,6 +7,7 @@ pub(in super) const PAYLOAD_FRAMETYPE: u8 = 0x3;
 pub(in super) const PAYLOAD_ACK_FRAMETYPE: u8 = 0x4;
 pub(in super) const SERVER_HAS_FINISHED_SENDING_FRAMETYPE: u8 = 0x5;
 pub(in super) const ABORT_FRAMETYPE: u8 = 0x6;
+pub(in super) const ABORTACK_FRAMETYPE: u8 = 0x7;
 
 /**
  * Each encoded Tube frame specifies its own structure, but all frames begin 
@@ -140,5 +141,26 @@ pub enum Frame {
     Abort {
         tube_id: u16,
         reason: AbortReason,
+    },
+
+    /**
+     * This frame is sent by a peer immediately after it receives an Abort 
+     * frame. Receiving an AbortAck allows a peer to know that it is now safe
+     * to re-use the aborted Tube's TubeId.
+     *
+     * This mitigates the following race condition:
+     * 
+     *   t0: Client creates Tube(id=1), server receives it
+     *   t1: Client and Server both send Abort(tube_id=1) at same time
+     *   t2: Client creates a new Tube(id=1) thinking id=1 is now free
+     *   t3: Client receives the (slow-to-arrive) Abort(tube_id=1) from the
+     *       server and incorrectly thinks it needs to Abort the new Tube!
+     *
+     *   +---------------+
+     *   |  TubeId(u16)  |
+     *   +---------------+
+     */
+    AbortAck {
+        tube_id: u16,
     },
 }

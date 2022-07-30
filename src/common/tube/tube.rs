@@ -46,25 +46,13 @@ pub mod error {
     }
 }
 
-enum TransportAction {
-  SendApplicationAbort,
-  SendHasFinishedSending,
-  SendPayload { 
-      data: Vec<u8>,
-      ack_timeout: Duration,
-  },
-  SendAndForgetPayload {
-      data: Vec<u8>,
-  },
-}
-
 async fn send_abort(
-    tube_id: u16,
+    tube_id: &mut UniqueId,
     reason: frame::AbortReason,
     tube_manager: &Arc<Mutex<TubeManager>>,
     sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,
 ) -> Result<(), error::AbortError> {
-    let frame_data = match frame::encode::abort_frame(tube_id, reason.clone()) {
+    let frame_data = match frame::encode::abort_frame(tube_id.val(), reason.clone()) {
         Ok(frame_data) => frame_data,
         Err(e) => return Err(error::AbortError::FrameEncodeError(e)),
     };
@@ -83,11 +71,14 @@ async fn send_abort(
         };
 
         tube_mgr.completion_state = TubeCompletionState::AbortedFromLocal(reason);
+        log::trace!("Tracking Tube(id={}) as a pending abort...", tube_id);
+        tube_mgr.abort_pending_id_reservation = Some(tube_id.take());
     };
 
     // TODO: Stick a timeout on these awaits so that some kind of pathological 
     //       hyper issue doesn't block the tube_mgr Mutex forever or something
     let mut sender = sender.lock().await;
+    log::trace!("Sending Abort(tube_id={})...", tube_id);
     match sender.send_data(frame_data.into()).await {
         Ok(_) => Ok(()),
         // TODO: Should this just be a panic? If we get into this state we don't
@@ -104,15 +95,15 @@ async fn send_abort(
 
 async fn send_has_finished_sending(
     peer_type: PeerType,
-    tube_id: u16,
+    tube_id: &mut UniqueId,
     tube_manager: &Arc<Mutex<TubeManager>>,
     sender: &Arc<tokio::sync::Mutex<hyper::body::Sender>>,
 ) -> Result<(), error::HasFinishedSendingError> {
     let maybe_frame_data = match peer_type {
         PeerType::Client => 
-            frame::encode::client_has_finished_sending_frame(tube_id),
+            frame::encode::client_has_finished_sending_frame(tube_id.val()),
         PeerType::Server => 
-            frame::encode::server_has_finished_sending_frame(tube_id),
+            frame::encode::server_has_finished_sending_frame(tube_id.val()),
     };
     let frame_data = match maybe_frame_data {
         Ok(data) => data,
@@ -194,7 +185,7 @@ impl Tube {
         reason: frame::AbortReason,
     ) -> Result<(), error::AbortError> {
         send_abort(
-            self.tube_id.val(), 
+            &mut self.tube_id, 
             reason, 
             &self.tube_manager,
             &self.sender,
@@ -205,10 +196,10 @@ impl Tube {
         return self.tube_id.val();
     }
 
-    pub async fn has_finished_sending(&self) -> Result<(), error::HasFinishedSendingError> {
+    pub async fn has_finished_sending(&mut self) -> Result<(), error::HasFinishedSendingError> {
         send_has_finished_sending(
             self.peer_type,
-            self.tube_id.val(),
+            &mut self.tube_id,
             &self.tube_manager,
             &self.sender,
         ).await
@@ -359,13 +350,13 @@ impl Drop for Tube {
             (Client, &ServerHasFinishedSending) |
             (Server, &ClientHasFinishedSending) => {
                 let peer_type = self.peer_type;
-                let tube_id = self.tube_id.take();
+                let mut tube_id = self.tube_id.take();
                 let tube_manager = self.tube_manager.clone();
                 let sender = self.sender.clone();
                 tokio::spawn(async move {
                     if let Err(e) = send_has_finished_sending(
                         peer_type,
-                        tube_id.val(),
+                        &mut tube_id,
                         &tube_manager,
                         &sender,
                     ).await {
@@ -392,12 +383,12 @@ impl Drop for Tube {
                     remote_peer_str,
                 );
 
-                let tube_id = self.tube_id.take();
+                let mut tube_id = self.tube_id.take();
                 let tube_manager = self.tube_manager.clone();
                 let sender = self.sender.clone();
                 tokio::spawn(async move {
                     if let Err(e) = send_abort(
-                        tube_id.val(), 
+                        &mut tube_id, 
                         frame::AbortReason::ApplicationError,
                         &tube_manager,
                         &sender,
